@@ -32,7 +32,7 @@ https://drive.google.com/file/d/1g69qziYaRUKLObjnvpNvaSJV-tBVsvNe/view?usp=drive
 
 ### Split the video into 10-second clip pieces
 ```
-cd src/preprocess
+cd src
 python video_splitter.py -f ./preprocess/sample_video/carsdontfly.mp4 -s 10
 ```
 
