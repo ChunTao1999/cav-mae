@@ -27,12 +27,15 @@ If there's an issue downloading YouTube video, try:
 brew update
 brew upgrade youtube-dl
 ```
-Example video (cars don't fly)
-https://drive.google.com/file/d/1g69qziYaRUKLObjnvpNvaSJV-tBVsvNe/view?usp=drive_link
+Example video 
+
+(Cars don't fly) https://drive.google.com/file/d/1g69qziYaRUKLObjnvpNvaSJV-tBVsvNe/view?usp=drive_link
+
+(Napoleon trailer) https://drive.google.com/file/d/1S0rsX9DS4vej02AJML8i6wQAd-OJkeu1/view?usp=drive_link
 
 ### Split the video into 10-second clip pieces
 ```
-cd src/preprocess
+cd src
 python video_splitter.py -f ./preprocess/sample_video/carsdontfly.mp4 -s 10
 ```
 
