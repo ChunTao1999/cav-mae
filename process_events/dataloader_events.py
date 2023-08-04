@@ -17,6 +17,8 @@ import PIL
 from PIL import Image
 import numpy as np
 import subprocess
+import pandas as pd
+import matplotlib.pyplot as plt
 import torch
 import torch.nn.functional
 from torch.utils.data import Dataset
@@ -24,20 +26,18 @@ import torchvision.transforms as T
 import torchaudio
 import pdb # debug
 
-#%% Arguments
-parser = argparse.ArgumentParser(description='function to create a PyTorch dataset for road event/anomaly detection and classification')
-parser.add_argument('-d', '--data-path', type=str, default='', required=True, help='path to the data folder')
-parser.add_argument('--cal-data-path', type=str, default='', required=True, help='path to the saved calibration data')
-parser.add_argument('--download-csvs', type=int, default=0, required=True, help='whether to download session csvs for sensor data, or to use a past stored session csv, 0 for True')
-parser.add_argument('--session-id', type=int, default=75151, required=False, help='session ids to the session data')
-args = parser.parse_args()
-
 
 #%% Event dataset class
 class RoadEventDataset(Dataset):
     """Dataset that manages sensor data segments and corresponding event frames"""
-    def __init__(self, dataset_json_path):
-        self.datapath = dataset_json_path
+    def __init__(self, dataset_jsonfile_path):
+        self.datapath = dataset_jsonfile_path
+        with open(dataset_jsonfile_path, 'r') as f:
+            data_json = json.load(f)
+        
+        self.data = data_json['data']
+        self.data = self.dict_to_numpy_data(self.data)
+        pdb.set_trace()
     
     def __len__(self):
         return
@@ -46,45 +46,40 @@ class RoadEventDataset(Dataset):
         return "Event Dataset"
 
     def __getitem__(self, index):
+        # use a single frame with one wheel accel segment, for now
+        datum = self.data[index]
+        datum = self.unpack_data[datum]
+        wheel_accel_spec = self.wheel_accel2spec(datum['wheel_accel_path'])
+        
         return
-
-
-#%% Main program
-if __name__ == '__main__':
-    # Download the session csvs
-    dataFolderNames = [a for a in os.listdir(args.data_path) if os.path.isdir(os.path.join(args.data_path, a))]
-    try:
-        dataFolderNames.remove('results')
-    except:
-        pass
-    try:
-        dataFolderNames.remove('chessboards')
-    except:
-        pass
-    try:
-        dataFolderNames.remove('session_csvs')
-    except:
-        pass
-    csv_save_path = os.path.join('/'.join(args.data_path.split('/')[:-1]), 'session_csvs')
-    if not os.path.exists(csv_save_path):
-        os.makedirs(csv_save_path)
-    if args.download_csvs == 0:
-        # download 100Hz session data, session offset data, and session events data
-        sessionIds = ' '.join(s.split('_')[-1] for s in dataFolderNames)
-        print(subprocess.run(["chmod", "+x", "/home/nano01/a/tao88/cav-mae/process_events/scripts/downloadSessionCsv.sh"]))
-        subprocess.call("/home/nano01/a/tao88/cav-mae/process_events/scripts/downloadSessionCsv.sh {}".format(sessionIds), shell=True)
-        print(subprocess.run(["chmod", "+x", "/home/nano01/a/tao88/cav-mae/process_events/scripts/downloadUnpackedSession.sh"]))
-        subprocess.call("/home/nano01/a/tao88/cav-mae/process_events/scripts/downloadUnpackedSession.sh {}".format(sessionIds), shell=True)
-        print(subprocess.run(["chmod", "+x", "/home/nano01/a/tao88/cav-mae/process_events/scripts/downloadEventList.sh"]))
-        subprocess.call("/home/nano01/a/tao88/cav-mae/process_events/scripts/downloadEventList.sh {}".format(sessionIds), shell=True)
-
-    # get the rear wheel accel data from session data, and FFT to get spectrogram (freq vs. time)
     
-
-
-
-
-    pdb.set_trace()
+    def preprocess(self):
+        return 
     
+    def wheel_accel2spec(self, wheel_accel_path):
+        # load np array from wheel_accel_path
+        sampling_freq = 500
+        N_window_FFT = 32
+        plt.figure()
+        spectrum, freqs, t_bins, im = plt.specgram(x=wheel_accel, 
+                                                    NFFT=N_window_FFT, 
+                                                    noverlap=0, 
+                                                    Fs=sampling_freq, 
+                                                    Fc=0,
+                                                    mode='default',
+                                                    scale='default',
+                                                    scale_by_freq=True) # (17,16) or (33,8)
+        return spectrum
+    
+    def dict_to_numpy_data(self, data_json):
+        for i in range(len(data_json)):
+            data_json[i] = [data_json[i]['frame_id'], data_json[i]['frame_path'], data_json[i]['wheel_accel_path'], data_json[i]['event_label']]
+        data_np = np.array(data_json, dtype=str)
+        return data_np
+    
+    def unpack_data(self, data_np):
+        datum = {}
+        datum['frame_id'], datum['frame_path'], datum['wheel_accel_path'], datum['event_label'] = data_np
+        return datum
 
 
