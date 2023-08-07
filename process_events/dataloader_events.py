@@ -10,6 +10,7 @@
 
 import argparse
 import csv
+import glob
 import json
 import os
 import random
@@ -34,52 +35,51 @@ class RoadEventDataset(Dataset):
         self.datapath = dataset_jsonfile_path
         with open(dataset_jsonfile_path, 'r') as f:
             data_json = json.load(f)
-        
+        # preprocess the weel accel data to get spectrograms
         self.data = data_json['data']
         self.data = self.dict_to_numpy_data(self.data)
         pdb.set_trace()
-    
-    def __len__(self):
-        return
-    
-    def __repr__(self):
-        return "Event Dataset"
 
-    def __getitem__(self, index):
-        # use a single frame with one wheel accel segment, for now
-        datum = self.data[index]
-        datum = self.unpack_data[datum]
-        wheel_accel_spec = self.wheel_accel2spec(datum['wheel_accel_path'])
-        
-        return
-    
+
     def preprocess(self):
         return 
     
-    def wheel_accel2spec(self, wheel_accel_path):
-        # load np array from wheel_accel_path
-        sampling_freq = 500
-        N_window_FFT = 32
-        plt.figure()
-        spectrum, freqs, t_bins, im = plt.specgram(x=wheel_accel, 
-                                                    NFFT=N_window_FFT, 
-                                                    noverlap=0, 
-                                                    Fs=sampling_freq, 
-                                                    Fc=0,
-                                                    mode='default',
-                                                    scale='default',
-                                                    scale_by_freq=True) # (17,16) or (33,8)
-        return spectrum
+
+    def load_spec(self, wheel_accel_path):
+        """Load wheel accel 1-d data and its corresponding 2-d spectrogram"""
+        spec = np.load(wheel_accel_path)
+        return spec
     
+
     def dict_to_numpy_data(self, data_json):
         for i in range(len(data_json)):
-            data_json[i] = [data_json[i]['frame_id'], data_json[i]['frame_path'], data_json[i]['wheel_accel_path'], data_json[i]['event_label']]
+            data_json[i] = [data_json[i]['frame_id'], 
+                            data_json[i]['frame_path'], 
+                            data_json[i]['wheelAccel_path'], 
+                            data_json[i]['wheelAccel_spec_path'], 
+                            data_json[i]['event_label']]
         data_np = np.array(data_json, dtype=str)
         return data_np
     
+
     def unpack_data(self, data_np):
         datum = {}
         datum['frame_id'], datum['frame_path'], datum['wheel_accel_path'], datum['event_label'] = data_np
         return datum
 
 
+    def __len__(self):
+        return len(self.data)
+    
+
+    def __repr__(self):
+        return "Event Dataset"
+
+
+    def __getitem__(self, index):
+        # use a single frame with one wheel accel segment, for now
+        datum = self.data[index]
+        datum = self.unpack_data[datum]
+        wheelAccel_spec = self.load_spec(datum['wheelAccel_spec_path'])
+        
+        return

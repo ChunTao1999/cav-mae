@@ -1,3 +1,4 @@
+import cv2
 import json
 import numpy as np
 import pandas as pd
@@ -7,10 +8,15 @@ import matplotlib.pyplot as plt
 import pdb # for debug
 
 
-def preprocess(data_path, wheelAccel_conf, download=True, plot_wheelAccel=True):
+def preprocess(cal_data_path, data_path, save_path, wheelAccel_conf, download=True, plot_wheelAccel=True):
     """
     Preprocess the data folder for one drive
     """
+    # length for each wheelAccel segment
+    num_samples = wheelAccel_conf['timespan'] * wheelAccel_conf['sampling_freq']
+    # load PM and IPM transform matrices
+    resmatrix, resmatrix_inv = np.load(os.path.join(cal_data_path, 'resmatrix.npy')), \
+                               np.load(os.path.join(cal_data_path, 'resmatrix_inv.npy'))
     # extract session ids from the data folder
     dataFolderNames = [s for s in os.listdir(data_path) \
                        if (os.path.isdir(os.path.join(data_path, s)) and s.split('_')[-1].isnumeric())]
@@ -19,10 +25,15 @@ def preprocess(data_path, wheelAccel_conf, download=True, plot_wheelAccel=True):
     csv_save_path = os.path.join('/'.join(data_path.split('/')[:-1]), 'session_csvs')
     if not os.path.exists(csv_save_path):
         os.makedirs(csv_save_path)
-    wheelAccel_save_path = os.path.join(data_path, 'wheelAccels')
+    wheelAccel_imsave_path = os.path.join(data_path, 'wheelAccels')
+    if not os.path.exists(wheelAccel_imsave_path):
+        os.makedirs(wheelAccel_imsave_path)
+    wheelAccel_save_path = os.path.join(save_path, 'wheelAccels')
     if not os.path.exists(wheelAccel_save_path):
         os.makedirs(wheelAccel_save_path)
-    
+    wheelAccel_spec_save_path = os.path.join(save_path, 'wheelAccel_specs')
+    if not os.path.exists(wheelAccel_spec_save_path):
+        os.makedirs(wheelAccel_spec_save_path)
     # download all relevant session data csvs according to the extracted session ids, if needed
     if download:
         # 100Hz session data, 500Hz session data, session offset data
@@ -36,7 +47,6 @@ def preprocess(data_path, wheelAccel_conf, download=True, plot_wheelAccel=True):
         subprocess.call("/home/nano01/a/tao88/cav-mae/process_events/scripts/downloadEventList.sh {}".format(sessionIdStrs), shell=True)
     
     # get the vehicle's rear WheelAccel and speed sensor data, and event timestamps from session csv data for all sessions
-    num_samples = wheelAccel_conf['timespan'] * wheelAccel_conf['sampling_freq']
     for sessionFolderName in dataFolderNames:
         session_id = int(sessionFolderName.split('_')[-1]) # cast to type int
         # read the session csvs
@@ -57,6 +67,7 @@ def preprocess(data_path, wheelAccel_conf, download=True, plot_wheelAccel=True):
         # crop the wheelAccel segments around event timestamps
         for key, values in json_data.items(): # keys are event timestamps, values are frame timestamps and distances
             event_timestamp = float(key)
+            # 1. Process wheelAccel segments and thier specs
             # allow overlaps across events
             event_start_idx = int((event_timestamp - session_timeShift - wheelAccel_conf['timespan']/2)*wheelAccel_conf['sampling_freq'])
             event_end_idx = int(event_start_idx + num_samples)
@@ -76,19 +87,44 @@ def preprocess(data_path, wheelAccel_conf, download=True, plot_wheelAccel=True):
             # save the wheelAccel segments
             with open(os.path.join(wheelAccel_save_path, 'wheelAccel_session_{:d}_event_{:.3f}.npy'.format(session_id, event_timestamp)), 'wb') as f:
                 np.save(f, wheelAccel_seg)
+            # process the wheelAccel segs to transform into spectrograms
+            plt.figure()
+            spectrum, freqs, t_bins, im = plt.specgram(x=wheelAccel_seg, 
+                                                       NFFT=wheelAccel_conf['N_windows_fft'], 
+                                                       noverlap=wheelAccel_conf['noverlap'], # can add some overlap
+                                                       Fs=wheelAccel_conf['sampling_freq'], 
+                                                       Fc=0,
+                                                       mode='default',
+                                                       scale='default',
+                                                       scale_by_freq=True) # (17,16) or (33,8)
+            # save the spectrogram
+            with open(os.path.join(wheelAccel_spec_save_path, 'wheelAccel_session_{:d}_event_{:.3f}_spec.npy'.format(session_id, event_timestamp)), 'wb') as f:
+                np.save(f, spectrum)
+            if plot_wheelAccel:
+                plt.savefig(os.path.join(wheelAccel_imsave_path, 'wheelAccel_session_{:d}_event_{:.3f}_spec.png'.format(session_id, event_timestamp)))
+            plt.close()
             # if visualize=True, plot and save the left and right wheelAccels
             if plot_wheelAccel:
                 fig, axes = plt.subplots(nrows=1, ncols=2)
                 fig.suptitle('WheelAccel, session {:d}, event {:.3f}, left {}, right {}'.format(session_id, event_timestamp, event_left, event_right))
-                axes[0].plot(np.array(sessionData_500.index/500),
+                axes[0].plot(np.array(sessionData_500.index[event_start_idx:event_end_idx]/500),
                              sessionData_500['rlWheelAccel'][event_start_idx:event_end_idx])
                 axes[0].set_title('rlWheelAccel')
                 axes[0].set_xlabel('time')
-                axes[1].plot(np.array(sessionData_500.index/500),
+                axes[1].plot(np.array(sessionData_500.index[event_start_idx:event_end_idx]/500),
                              sessionData_500['rrWheelAccel'][event_start_idx:event_end_idx])
                 axes[1].set_title('rrWheelAccel')
                 axes[1].set_xlabel('time')
-                plt.savefig(os.path.join(wheelAccel_save_path, 'wheelAccel_session_{:d}_event_{:.3f}.png'.format(session_id, event_timestamp)))
+                plt.savefig(os.path.join(wheelAccel_imsave_path, 'wheelAccel_session_{:d}_event_{:.3f}.png'.format(session_id, event_timestamp)))
+
+            # 2. Process one/all of the frames relevant to the current event
+            for idx, [frame_timestamp, frame_dist] in enumerate(values):
+                frame = cv2.imread()
+                continue
+
+        
         print('WheelAccel segments saved for all events in session {}...'.format(session_id))
-    print('All wheelAccels saved!')
+    print('All processed frames and wheelAccels saved!')
     return 
+
+# get wheel accel paths from self.data and extract spectrograms from it, add this to preprocess
