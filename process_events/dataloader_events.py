@@ -37,8 +37,6 @@ class RoadEventDataset(Dataset):
             data_json = json.load(f)
         # preprocess the weel accel data to get spectrograms
         self.data = data_json['data']
-        self.data = self.dict_to_numpy_data(self.data)
-        pdb.set_trace()
 
 
     def preprocess(self):
@@ -50,24 +48,6 @@ class RoadEventDataset(Dataset):
         spec = np.load(wheel_accel_path)
         return spec
     
-
-    def dict_to_numpy_data(self, data_json):
-        for i in range(len(data_json)):
-            data_json[i] = [data_json[i]['frame_id'], 
-                            data_json[i]['frame_path'], 
-                            data_json[i]['wheelAccel_path'], 
-                            data_json[i]['wheelAccel_spec_path'], 
-                            data_json[i]['event_label']]
-        data_np = np.array(data_json, dtype=str)
-        return data_np
-    
-
-    def unpack_data(self, data_np):
-        datum = {}
-        datum['frame_id'], datum['frame_path'], datum['wheel_accel_path'], datum['event_label'] = data_np
-        return datum
-
-
     def __len__(self):
         return len(self.data)
     
@@ -79,7 +59,6 @@ class RoadEventDataset(Dataset):
     def __getitem__(self, index):
         # use a single frame with one wheel accel segment, for now
         datum = self.data[index]
-        datum = self.unpack_data[datum]
         wheelAccel_spec = self.load_spec(datum['wheelAccel_spec_path'])
         
-        return
+        return datum

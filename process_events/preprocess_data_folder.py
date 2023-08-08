@@ -40,10 +40,13 @@ def preprocess(cal_data_path,
     wheelAccel_imsave_path = os.path.join(data_path, 'wheelAccels')
     if not os.path.exists(wheelAccel_imsave_path):
         os.makedirs(wheelAccel_imsave_path)
-    processedFrame_imsave_rv_path = os.path.join(data_path, 'results', 'frames_rv')
+    origFrame_imsave_rv_path = os.path.join(save_path, 'frames_rv')
+    if not os.path.exists(origFrame_imsave_rv_path):
+        os.makedirs(origFrame_imsave_rv_path)
+    processedFrame_imsave_rv_path = os.path.join(data_path, 'results', 'frames_rv_annotated')
     if not os.path.exists(processedFrame_imsave_rv_path):
         os.makedirs(processedFrame_imsave_rv_path)
-    processedFrame_imsave_bev_path = os.path.join(data_path, 'results', 'frames_bev')
+    processedFrame_imsave_bev_path = os.path.join(data_path, 'results', 'frames_bev_annotated')
     if not os.path.exists(processedFrame_imsave_bev_path):
         os.makedirs(processedFrame_imsave_bev_path) 
     wheelAccel_save_path = os.path.join(save_path, 'wheelAccels')
@@ -157,14 +160,10 @@ def preprocess(cal_data_path,
             # 2. Process one/all of the frames relevant to the current event
             current_event_dict['frame_paths'] = []
             for frame_idx, [frame_timestamp, frame_dist] in enumerate(values): # for each frame
-                frame_path = os.path.join(data_path,
-                                          sessionFolderName,
-                                          'event_{:.3f}_frame_{}_at_time_{:.3f}_dist_{:.3f}.png'.format(event_timestamp,
-                                                                                                        frame_idx,
-                                                                                                        frame_timestamp,
-                                                                                                        frame_dist))
-                frame = cv2.imread(frame_path)
-                current_event_dict['frame_paths'].append(frame_path)
+                frame_name = f'event_{event_timestamp:.3f}_frame_{frame_idx:d}_at_time_{frame_timestamp:.3f}_dist_{frame_dist:.3f}.png'
+                frame = cv2.imread(os.path.join(data_path, sessionFolderName, frame_name))
+                cv2.imwrite(os.path.join(origFrame_imsave_rv_path, frame_name), frame)
+                current_event_dict['frame_paths'].append(os.path.join(origFrame_imsave_rv_path, frame_name))
                 frame = cv2.undistort(frame, mtx, dist)
                 pts_bev, pts_inv, accum_boxcenter = compute_event_loc_dist_curves(event_timeoffset=event_timestamp+eventmarking_conf['event_timestamp_shift'],
                                                                                   event_left=session_eventDict[float(format(event_timestamp, '.3f'))][1],
