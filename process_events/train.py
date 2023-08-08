@@ -27,6 +27,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument('-c', '--calibrate', type=int, default=0, required=True, help='whether to calibrate camera and save camera matrices, 0 for True')
 parser.add_argument('-p', '--perspective', type=int, default=0, required=True, help='whether to compute perspective transform or not, 0 for True')
 parser.add_argument('-j', '--dataset-jsonfile-path', type=str, default='', required=True, help='filepath to dataset jsonfile')
+parser.add_argument('--eventtype-json-path', type=str, default='', required=True, help='path to the json file describing convertion from event type label to event type description')
 parser.add_argument('-d', '--data-path', type=str, default='', required=True, help='path to the data folder')
 parser.add_argument('--cal-data-path', type=str, default='', required=True, help='path to the saved calibration data')
 parser.add_argument('--dataset-path', type=str, default='', required=True, help='dataset path to save to')
@@ -50,15 +51,16 @@ else:
     print("Preprocess: camera calibration skipped, using previous......")
 # define the perspective transform to use for the raw rv road event frames
 if args.perspective==0:
-    print("Preprocess: perspective transform......")
+    print("\nPreprocess: perspective transform......")
     define_perspective_transform(cal_data_path=args.cal_data_path,
-                                img_cal_path=os.path.join(args.data_path, 'cal_img.jpg'),
-                                IMAGE_H=600, 
-                                IMAGE_W=600,
-                                srcpts_arr = [[236,1218],[2170,1190],[1532,703],[885,708]], # CCLK, from bottom left
-                                destpts_arr= [[50,580],[550,580],[550,250],[50,250]])
+                                 img_cal_path=os.path.join(args.data_path, 'cal_img.jpg'),
+                                 IMAGE_H=600, 
+                                 IMAGE_W=600,
+                                 cv2_imread_frame_dim=(1920, 1080),
+                                 srcpts_arr = [[236,1218],[2170,1190],[1532,703],[885,708]], # CCLK, from bottom left
+                                 destpts_arr= [[50,580],[550,580],[550,250],[50,250]])
 else:
-    print("Preprocess: perspective transform skipped, using previous......")
+    print("\nPreprocess: perspective transform skipped, using previous......")
 # define wheelAccel transform configs
 wheelAccel_conf = {'wheel_id': ['rlWheelAccel', 'rrWheelAccel'],
                    'sampling_freq': 500,
@@ -66,13 +68,28 @@ wheelAccel_conf = {'wheel_id': ['rlWheelAccel', 'rrWheelAccel'],
                    'N_windows_fft': 32,
                    'noverlap': 16,
                    'spec_size': (17, 31)}
+eventMarking_conf = {'cv2_imread_frame_dim': (1920, 1080), # (w, h)
+                     'event_timestamp_shift': 0, # negative shift here
+                     'frame_timestamp_shift': 0.2,
+                     'bev_frame_dim': (600,600),
+                     'wheel_to_base_dist': 4, # 4.572
+                     'base_pixel': 20,
+                     'wheel_width': 1.664,
+                     'xm_per_pix': 4.318/500,
+                     'ym_per_pix': 8.8/330, # 8.89
+                     'event_len_pix': 200}
 # Preprocess to get event frames, event 1-d wheelAccel, event 2-d spectrograms, and grouth-truth bbox locations and event labels
 # Write all info to the dataset dictionary
+print("\nPreprocess: transforming wheelAccel to spectrogram and marking events in the frames......")
 preprocess(cal_data_path=args.cal_data_path,
            data_path=args.data_path,
            save_path=args.dataset_path,
+           json_save_path = args.dataset_jsonfile_path,
            wheelAccel_conf=wheelAccel_conf,
+           eventmarking_conf=eventMarking_conf,
+           eventType_json_path=args.eventtype_json_path,
            download=True if args.download_csvs==0 else False,
-           plot_wheelAccel=True)
+           plot_wheelAccel=True,
+           plot_processedFrames=True)
 
-roadevent_dataset = RoadEventDataset(args.dataset_jsonfile_path)
+roadevent_dataset = RoadEventDataset(args.dataset_jsonfile_path) # pdb breakpoint inside
