@@ -31,12 +31,17 @@ import pdb # debug
 #%% Event dataset class
 class RoadEventDataset(Dataset):
     """Dataset that manages sensor data segments and corresponding event frames"""
-    def __init__(self, dataset_jsonfile_path):
+    def __init__(self, dataset_jsonfile_path, dataset_conf):
         self.datapath = dataset_jsonfile_path
         with open(dataset_jsonfile_path, 'r') as f:
             data_json = json.load(f)
         # preprocess the weel accel data to get spectrograms
         self.data = data_json['data']
+        self.frame_size = dataset_conf['frame_size']
+        self.frame_transform = T.Compose([T.Resize(size=self.frame_size,
+                                                   interpolation=T.InterpolationMode.BILINEAR),
+                                          T.ToTensor()])
+        self.spec_transform = T.Compose([T.ToTensor()])
 
 
     def preprocess(self):
@@ -58,7 +63,12 @@ class RoadEventDataset(Dataset):
 
     def __getitem__(self, index):
         # use a single frame with one wheel accel segment, for now
-        datum = self.data[index]
+        datum = self.data[index] # datum keys: "event_timestamp", "event_label"
         wheelAccel_spec = self.load_spec(datum['wheelAccel_spec_path'])
+        wheelAccel_spec = self.spec_transform(wheelAccel_spec)
+        event_frame = Image.open(datum['frame_paths'][0])
+        event_frame = self.frame_transform(event_frame) # use the first frame (nearest)
+    
         
-        return datum
+        # return the event frame, event spec, event bbox coords, and event label
+        return wheelAccel_spec, event_frame

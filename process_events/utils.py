@@ -199,3 +199,8 @@ def boox_coords_to_bbox_label(pts_inv):
     """Convert from 4 bbox coordinates to a bbox label representation (topleft_x, topleft_y, width, height), needs to be json-serializable too"""
     bbox_label = pts_inv.tolist()
     return bbox_label
+
+
+def normalize_wheel_accel(wheelAccel_seg, v_peak, v_nom):
+    wheelAccel_seg /= np.square(v_peak/v_nom)
+    return wheelAccel_seg

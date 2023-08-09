@@ -5,7 +5,7 @@ import pandas as pd
 import os
 import subprocess
 import matplotlib.pyplot as plt
-from utils import compute_event_loc_dist_curves, add_bbox_to_frame, add_accum_boxcenter, boox_coords_to_bbox_label
+from utils import compute_event_loc_dist_curves, add_bbox_to_frame, add_accum_boxcenter, boox_coords_to_bbox_label, normalize_wheel_accel
 import pdb # for debug
 
 
@@ -105,6 +105,8 @@ def preprocess(cal_data_path,
             # allow overlaps across events
             event_start_idx = int((event_timestamp - session_timeShift - wheelAccel_conf['timespan']/2)*wheelAccel_conf['sampling_freq'])
             event_end_idx = int(event_start_idx + num_samples)
+            event_start_idx_100, event_end_idx_100 = int((event_timestamp - session_timeShift - wheelAccel_conf['timespan']/2)*100), \
+                                                     int((event_timestamp - session_timeShift + wheelAccel_conf['timespan']/2)*100)
             event_label = session_eventDict[float(format(event_timestamp, '.3f'))][0]
             current_event_dict['event_label'] = event_label
             current_event_dict['event_type'] = eventType_json_data[str(event_label)]
@@ -121,6 +123,10 @@ def preprocess(cal_data_path,
                 wheelAccel_right_seg = np.float32(sessionData_500['rrWheelAccel'][event_start_idx:event_end_idx])
                 wheelAccel_right_seg = np.expand_dims(wheelAccel_right_seg, axis=0) # (1, 512)
                 wheelAccel_seg = np.float32(np.concatenate([wheelAccel_left_seg, wheelAccel_right_seg], axis=0)) # (2, 512)
+            # normalize the wheelAccel_seg based on peak speed and nominal speed
+            wheelAccel_seg = normalize_wheel_accel(wheelAccel_seg=wheelAccel_seg,
+                                                   v_peak=np.max(sessionData_100['speed'][event_start_idx_100:event_end_idx_100]),
+                                                   v_nom=wheelAccel_conf['nominal_speed'])
             # save the wheelAccel segments
             with open(os.path.join(wheelAccel_save_path, 'wheelAccel_session_{:d}_event_{:.3f}.npy'.format(session_id, event_timestamp)), 'wb') as f:
                 np.save(f, wheelAccel_seg)
@@ -161,10 +167,10 @@ def preprocess(cal_data_path,
             current_event_dict['frame_paths'] = []
             for frame_idx, [frame_timestamp, frame_dist] in enumerate(values): # for each frame
                 frame_name = f'event_{event_timestamp:.3f}_frame_{frame_idx:d}_at_time_{frame_timestamp:.3f}_dist_{frame_dist:.3f}.png'
-                frame = cv2.imread(os.path.join(data_path, sessionFolderName, frame_name))
-                cv2.imwrite(os.path.join(origFrame_imsave_rv_path, frame_name), frame)
-                current_event_dict['frame_paths'].append(os.path.join(origFrame_imsave_rv_path, frame_name))
+                frame = cv2.imread(os.path.join(data_path, sessionFolderName, frame_name))  
                 frame = cv2.undistort(frame, mtx, dist)
+                current_event_dict['frame_paths'].append(os.path.join(origFrame_imsave_rv_path, frame_name))
+                cv2.imwrite(os.path.join(origFrame_imsave_rv_path, frame_name), frame)
                 pts_bev, pts_inv, accum_boxcenter = compute_event_loc_dist_curves(event_timeoffset=event_timestamp+eventmarking_conf['event_timestamp_shift'],
                                                                                   event_left=session_eventDict[float(format(event_timestamp, '.3f'))][1],
                                                                                   event_right=session_eventDict[float(format(event_timestamp, '.3f'))][2],
@@ -197,7 +203,7 @@ def preprocess(cal_data_path,
                                 frame_rv) 
                     cv2.imwrite(os.path.join(processedFrame_imsave_bev_path, 'event_{:.3f}_frame_{}_at_time_{:.3f}_dist_{:.3f}_bev.png'.format(event_timestamp, frame_idx, frame_timestamp, frame_dist)),
                                 frame_bev)
-                print('\revent_{:.3f}_frame_{}_at_time_{:.3f}_dist_{:.3f}'.format(event_timestamp,
+                print('\tevent_{:.3f}_frame_{}_at_time_{:.3f}_dist_{:.3f}'.format(event_timestamp,
                                                                                 frame_idx, 
                                                                                 frame_timestamp,
                                                                                 frame_dist))
