@@ -10,15 +10,18 @@ import pdb # for debug
 
 
 class BoundingBoxApp:
-    def __init__(self, root, folder_path):
+    def __init__(self, root, folder_path, save_path):
         self.root = root
         self.folder = folder_path
+        self.json_save_path = save_path
         self.file_list = glob.glob(os.path.join(self.folder, '*.png'))
         self.file_list = natsorted(self.file_list)
         self.file_idx = 0
         self.canvas = None
         self.points = []
+        self.event_label = ""
         self.bbox_list = []
+        # Here, instead of intiating a blank dictionary, can copy the auto-generated dict and manually tweak the dataset metadata on top of it.
         self.label_dict = {}
         self.label_dict['label_data'] = []
         self.setup_ui()
@@ -29,6 +32,10 @@ class BoundingBoxApp:
         self.root.geometry("1280x720")
         self.root.columnconfigure([0, 1], minsize=200, weight=1)
         self.root.rowconfigure(0, minsize=200, weight=1)
+        self.root.protocol("WM_DELETE_WINDOW", self.quit_and_save) 
+        self.root.bind("s", self.save_annotations)
+        self.root.bind("n", self.load_next_image) # either clicking "Next" button or pressing "n" button on the keyboard
+        self.root.bind("r", self.redo_bounding_boxes)
 
         frm_left = tk.Frame(self.root, relief=tk.RAISED, bd=2)
         
@@ -42,11 +49,17 @@ class BoundingBoxApp:
         entry_label = tk.Label(frm_left, text="Enter event type here:")
         self.e1 = tk.Entry(frm_left)
         self.save_button = tk.Button(
-            frm_left, text="Save", command=self.save_annotations
+            frm_left, text="Save"
         )
+        self.save_button.bind("<Button-1>", self.save_annotations)
         self.next_button = tk.Button(
-            frm_left, text="Next", command=self.load_next_image
+            frm_left, text="Next"
         )
+        self.next_button.bind("<Button-1>", self.load_next_image)
+        self.redo_button = tk.Button(
+            frm_left, text="Redo"
+        )
+        self.redo_button.bind("<Button-1>", self.redo_bounding_boxes)
         
         frm_right = tk.Frame(
             self.root, width=600, height=400, relief=tk.RAISED, bd=2
@@ -62,6 +75,7 @@ class BoundingBoxApp:
         self.e1.pack()
         self.save_button.pack(side=tk.LEFT, padx=5, pady=5)
         self.next_button.pack(side=tk.LEFT, padx=5, pady=5)
+        self.redo_button.pack(side=tk.LEFT, padx=5, pady=5)
 
         frm_left.grid(row=0, column=0, sticky="ns")
         frm_right.grid(row=0, column=1, sticky="nsew")
@@ -83,12 +97,12 @@ class BoundingBoxApp:
         # Draw line segments between polygon vertex clicks
         if len(self.points) >= 2:
             last_point = self.points[-2]
-            self.canvas.create_line(last_point[0], last_point[1], x, y, fill="blue")
+            self.canvas.create_line(last_point[0], last_point[1], x, y, fill="blue", width=2, tags="bbox")
         
-        self.canvas.create_oval(x - 2, y - 2, x + 2, y + 2, fill="red")
+        self.canvas.create_oval(x - 2, y - 2, x + 2, y + 2, fill="red", tags="dots")
 
 
-    def finish_polygon(self):
+    def finish_polygon(self, event):
         if len(self.points) >= 3:
             self.canvas.create_polygon(
                 [coord for point in self.points for coord in point],
@@ -98,11 +112,18 @@ class BoundingBoxApp:
                 tags="bbox",
             )
             self.bbox_list.append(self.points) # get the series of points clicked in a bbox
-            self.event_type = self.e1.get()
+            self.event_label = self.e1.get()
         self.points = []
 
 
-    def load_next_image(self):
+    def redo_bounding_boxes(self, event):
+        self.canvas.delete("bbox")
+        self.canvas.delete("dots")
+        self.bbox_list = []
+        self.points = []
+
+
+    def load_next_image(self, event):
         self.file_idx = (self.file_idx + 1) % len(self.file_list)
         self.update_image()
 
@@ -120,33 +141,40 @@ class BoundingBoxApp:
         self.e1.delete(0, tk.END) # update the entry field to clear the previous event type
 
 
-    def save_annotations(self):
-        # save self.event_type, and self.bbox_list
+    def save_annotations(self, event):
+        # save self.event_label, and self.bbox_list
         if len(self.label_dict['label_data']) > self.file_idx:
             self.label_dict['label_data'].pop()
+        self.event_label = self.e1.get()
         self.label_dict['label_data'].append({'frame_path': self.file_list[self.file_idx],
-                                              'event_type': self.event_type,
+                                              'event_label': self.event_label,
                                               'bbox_list': self.bbox_list})
         
     
     def save_label_data(self):
-        with open('/home/nano01/a/tao88/RoadEvent-Dataset/tweaked_labels/labels.json', 'w') as outfile:
+        with open(self.json_save_path, 'w', encoding='utf-8') as outfile:
             json.dump(self.label_dict, outfile)
         print('Manually labeled data saved!')
+    
 
+    def quit_and_save(self):
+        self.save_label_data()
+        self.root.destroy()
+    
 
 def main():
     # Arguments
     parser = argparse.ArgumentParser()
-    parser.add_argument('-d', '--data-folder-path', default='', required=True, help='data folder path')
-    parser.add_argument('-n', '--image-file-name', default='', required=True, help='name of the frame to load')
+    parser.add_argument('-d', '--data-folder-path', type=str, default='', required=True, help='data folder path')
+    parser.add_argument('-n', '--image-file-name', type=str, default='', required=True, help='name of the frame to load')
+    parser.add_argument('-s', '--json-save-path', type=str, default='', required=True, help='path to save the resulting label json file')
     args = parser.parse_args()
 
     root = tk.Tk()
-    app = BoundingBoxApp(root, args.data_folder_path)
+    app = BoundingBoxApp(root, 
+                         folder_path=args.data_folder_path, 
+                         save_path=args.json_save_path)
     root.mainloop()
-    # on exit click, save the label dictionary
-    app.save_label_data()
 
 
 if __name__ == "__main__":

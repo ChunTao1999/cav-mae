@@ -1,7 +1,7 @@
 CALIBRATE=1
 PERSPECTIVE=1
 DOWNLOAD_CSV=1
-PREPROCESS=1
+PREPROCESS=0
 SEED=0
 NUM_EPOCHS=1
 DATASET_JSONFILE_PATH=/home/nano01/a/tao88/RoadEvent-Dataset/datafiles/events_metafile.json

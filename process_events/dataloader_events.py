@@ -63,10 +63,11 @@ class RoadEventDataset(Dataset):
 
     def __getitem__(self, index):
         # use a single frame with one wheel accel segment, for now
-        datum = self.data[index] # datum keys: "event_timestamp", "event_label"
-        wheelAccel_spec = self.load_spec(datum['wheelAccel_spec_path'])
+        datum = self.data[index] # datum key is the event_id
+        event_id = list(datum)[0]
+        wheelAccel_spec = self.load_spec(datum[event_id]['wheelAccel_spec_path'])
         wheelAccel_spec = self.spec_transform(wheelAccel_spec)
-        event_frame = Image.open(datum['frame_paths'][0])
+        event_frame = Image.open(datum[event_id]['frame_paths'][0])
         event_frame = self.frame_transform(event_frame) # use the first frame (nearest)
     
         

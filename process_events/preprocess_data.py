@@ -99,7 +99,8 @@ def preprocess(cal_data_path,
 
         for key, values in json_data.items(): # for each event, keys are event timestamps, values are frame timestamps and distances
             event_timestamp = float(key)
-            current_event_dict['event_id'] = f'session_{session_id}_event_{event_timestamp}' # write to dict
+            event_id = f'session_{session_id:d}_event_{event_timestamp:.3f}'
+            current_event_dict[event_id] = {'event_id': event_id} # write to dict
             
             # 1. Process wheelAccel segments and their specs
             # allow overlaps across events
@@ -108,8 +109,8 @@ def preprocess(cal_data_path,
             event_start_idx_100, event_end_idx_100 = int((event_timestamp - session_timeShift - wheelAccel_conf['timespan']/2)*100), \
                                                      int((event_timestamp - session_timeShift + wheelAccel_conf['timespan']/2)*100)
             event_label = session_eventDict[float(format(event_timestamp, '.3f'))][0]
-            current_event_dict['event_label'] = event_label
-            current_event_dict['event_type'] = eventType_json_data[str(event_label)]
+            current_event_dict[event_id]['event_label'] = str(event_label)
+            current_event_dict[event_id]['event_type'] = eventType_json_data[str(event_label)]
             event_left, event_right = session_eventDict[float(format(event_timestamp, '.3f'))][1:3]
             # crop the wheelAccel data into segments around event timestamps
             if event_left and not event_right:
@@ -130,7 +131,7 @@ def preprocess(cal_data_path,
             # save the wheelAccel segments
             with open(os.path.join(wheelAccel_save_path, 'wheelAccel_session_{:d}_event_{:.3f}.npy'.format(session_id, event_timestamp)), 'wb') as f:
                 np.save(f, wheelAccel_seg)
-            current_event_dict['wheelAccel_path'] = os.path.join(wheelAccel_save_path, f'wheelAccel_session_{session_id:d}_event_{event_timestamp:.3f}.npy')
+            current_event_dict[event_id]['wheelAccel_path'] = os.path.join(wheelAccel_save_path, f'wheelAccel_session_{session_id:d}_event_{event_timestamp:.3f}.npy')
             # process the wheelAccel segs to transform into spectrograms
             plt.figure()
             spectrum, freqs, t_bins, im = plt.specgram(x=wheelAccel_seg, 
@@ -144,7 +145,7 @@ def preprocess(cal_data_path,
             # save the spectrogram
             with open(os.path.join(wheelAccel_spec_save_path, 'wheelAccel_session_{:d}_event_{:.3f}_spec.npy'.format(session_id, event_timestamp)), 'wb') as f:
                 np.save(f, spectrum)
-            current_event_dict['wheelAccel_spec_path'] = os.path.join(wheelAccel_spec_save_path, f'wheelAccel_session_{session_id:d}_event_{event_timestamp:.3f}_spec.npy')
+            current_event_dict[event_id]['wheelAccel_spec_path'] = os.path.join(wheelAccel_spec_save_path, f'wheelAccel_session_{session_id:d}_event_{event_timestamp:.3f}_spec.npy')
             if plot_wheelAccel:
                 plt.savefig(os.path.join(wheelAccel_imsave_path, 'wheelAccel_session_{:d}_event_{:.3f}_spec.png'.format(session_id, event_timestamp)))
             plt.close()
@@ -164,12 +165,13 @@ def preprocess(cal_data_path,
                 plt.close()
 
             # 2. Process one/all of the frames relevant to the current event
-            current_event_dict['frame_paths'] = []
+            current_event_dict[event_id]['frame_paths'] = []
+            current_event_dict[event_id]['bbox_coords'] = []
             for frame_idx, [frame_timestamp, frame_dist] in enumerate(values): # for each frame
                 frame_name = f'event_{event_timestamp:.3f}_frame_{frame_idx:d}_at_time_{frame_timestamp:.3f}_dist_{frame_dist:.3f}.png'
                 frame = cv2.imread(os.path.join(data_path, sessionFolderName, frame_name))  
                 frame = cv2.undistort(frame, mtx, dist)
-                current_event_dict['frame_paths'].append(os.path.join(origFrame_imsave_rv_path, frame_name))
+                current_event_dict[event_id]['frame_paths'].append(os.path.join(origFrame_imsave_rv_path, frame_name))
                 cv2.imwrite(os.path.join(origFrame_imsave_rv_path, frame_name), frame)
                 pts_bev, pts_inv, accum_boxcenter = compute_event_loc_dist_curves(event_timeoffset=event_timestamp+eventmarking_conf['event_timestamp_shift'],
                                                                                   event_left=session_eventDict[float(format(event_timestamp, '.3f'))][1],
@@ -197,7 +199,7 @@ def preprocess(cal_data_path,
                                                 accum_boxcenter=accum_boxcenter)
                 frame_bev = add_bbox_to_frame(image=frame_bev,
                                               pts_inv=pts_bev)
-                current_event_dict['bbox_coords'] = boox_coords_to_bbox_label(pts_inv)
+                current_event_dict[event_id]['bbox_coords'].append(boox_coords_to_bbox_label(pts_inv))
                 if plot_processedFrames:
                     cv2.imwrite(os.path.join(processedFrame_imsave_rv_path, 'event_{:.3f}_frame_{}_at_time_{:.3f}_dist_{:.3f}_rv.png'.format(event_timestamp, frame_idx, frame_timestamp, frame_dist)),
                                 frame_rv) 
