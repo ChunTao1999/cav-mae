@@ -37,6 +37,7 @@ class RoadEventDataset(Dataset):
             data_json = json.load(f)
         # preprocess the weel accel data to get spectrograms
         self.data = data_json['data']
+        self.event_ids = list(self.data.keys())
         self.frame_size = dataset_conf['frame_size']
         self.frame_transform = T.Compose([T.Resize(size=self.frame_size,
                                                    interpolation=T.InterpolationMode.BILINEAR),
@@ -54,7 +55,7 @@ class RoadEventDataset(Dataset):
         return spec
     
     def __len__(self):
-        return len(self.data)
+        return len(self.event_ids)
     
 
     def __repr__(self):
@@ -63,13 +64,12 @@ class RoadEventDataset(Dataset):
 
     def __getitem__(self, index):
         # use a single frame with one wheel accel segment, for now
-        datum = self.data[index] # datum key is the event_id
-        event_id = list(datum)[0]
-        wheelAccel_spec = self.load_spec(datum[event_id]['wheelAccel_spec_path'])
+        event_id = self.event_ids[index]
+        datum = self.data[event_id] # datum key is the event_id
+        wheelAccel_spec = self.load_spec(datum['wheelAccel_spec_path'])
         wheelAccel_spec = self.spec_transform(wheelAccel_spec)
-        event_frame = Image.open(datum[event_id]['frame_paths'][0])
+        event_frame = Image.open(datum['frame_paths'][0])
         event_frame = self.frame_transform(event_frame) # use the first frame (nearest)
-    
         
         # return the event frame, event spec, event bbox coords, and event label
         return wheelAccel_spec, event_frame

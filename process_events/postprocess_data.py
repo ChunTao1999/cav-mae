@@ -6,25 +6,42 @@ from PIL import Image, ImageTk
 from natsort import natsorted
 import numpy as np
 import json
+import shutil
 import pdb # for debug
 
 
 class BoundingBoxApp:
-    def __init__(self, root, folder_path, save_path):
+    def __init__(self, root, data_path, prev_path, save_path):
         self.root = root
-        self.folder = folder_path
+        self.data_path = data_path
+        self.prev_json_path = prev_path
         self.json_save_path = save_path
-        self.file_list = glob.glob(os.path.join(self.folder, '*.png'))
-        self.file_list = natsorted(self.file_list)
+        self.get_rv_files_list()
+        self.prepare_json()
         self.file_idx = 0
         self.canvas = None
         self.points = []
         self.event_label = ""
         self.bbox_list = []
-        # Here, instead of intiating a blank dictionary, can copy the auto-generated dict and manually tweak the dataset metadata on top of it.
-        self.label_dict = {}
-        self.label_dict['label_data'] = []
         self.setup_ui()
+
+
+    def get_rv_files_list(self):
+         # get the session ids
+        dataFolderNames = [s for s in os.listdir(self.data_path) \
+                        if (os.path.isdir(os.path.join(self.data_path, s)) and s.split('_')[-1].isnumeric())]
+        self.sessionId_list = [s.split('_')[-1] for s in dataFolderNames]
+        self.file_list = glob.glob(os.path.join(self.data_path, "results", "frames_rv_annotated", "*.png"))
+        self.file_list = natsorted(self.file_list)
+        return 
+    
+
+    def prepare_json(self):
+        shutil.copy(self.prev_json_path, self.json_save_path)
+        with open(self.json_save_path, 'r') as in_file:
+            self.label_dict = json.load(in_file)
+        self.event_id_list = list(self.label_dict['data'].keys())
+        return
 
 
     def setup_ui(self):
@@ -34,6 +51,7 @@ class BoundingBoxApp:
         self.root.rowconfigure(0, minsize=200, weight=1)
         self.root.protocol("WM_DELETE_WINDOW", self.quit_and_save) 
         self.root.bind("s", self.save_annotations)
+        self.root.bind("p", self.load_prev_image)
         self.root.bind("n", self.load_next_image) # either clicking "Next" button or pressing "n" button on the keyboard
         self.root.bind("r", self.redo_bounding_boxes)
 
@@ -52,6 +70,10 @@ class BoundingBoxApp:
             frm_left, text="Save"
         )
         self.save_button.bind("<Button-1>", self.save_annotations)
+        self.prev_button = tk.Button(
+            frm_left, text="Prev"
+        )
+        self.prev_button.bind("<Button-1>", self.load_prev_image)
         self.next_button = tk.Button(
             frm_left, text="Next"
         )
@@ -74,6 +96,7 @@ class BoundingBoxApp:
         entry_label.pack()
         self.e1.pack()
         self.save_button.pack(side=tk.LEFT, padx=5, pady=5)
+        self.prev_button.pack(side=tk.LEFT, padx=5, pady=5)
         self.next_button.pack(side=tk.LEFT, padx=5, pady=5)
         self.redo_button.pack(side=tk.LEFT, padx=5, pady=5)
 
@@ -81,7 +104,7 @@ class BoundingBoxApp:
         frm_right.grid(row=0, column=1, sticky="nsew")
 
         demo_pic = Image.open(self.file_list[self.file_idx])
-        demo_pic_resized = demo_pic.resize((640, 480), Image.Resampling.LANCZOS)
+        demo_pic_resized = demo_pic.resize((640, 360), Image.Resampling.LANCZOS)
         self.demo_img = ImageTk.PhotoImage(demo_pic_resized)
 
         self.canvas.create_image(0, 0, anchor=tk.NW, image=self.demo_img)
@@ -128,6 +151,11 @@ class BoundingBoxApp:
         self.update_image()
 
 
+    def load_prev_image(self, event):
+        self.file_idx = (self.file_idx - 1) % len(self.file_list)
+        self.update_image()
+
+
     def update_image(self):
         # open and display the new image
         demo_pic = Image.open(self.file_list[self.file_idx])
@@ -143,12 +171,19 @@ class BoundingBoxApp:
 
     def save_annotations(self, event):
         # save self.event_label, and self.bbox_list
-        if len(self.label_dict['label_data']) > self.file_idx:
-            self.label_dict['label_data'].pop()
         self.event_label = self.e1.get()
-        self.label_dict['label_data'].append({'frame_path': self.file_list[self.file_idx],
-                                              'event_label': self.event_label,
-                                              'bbox_list': self.bbox_list})
+        event_id = '_'.join(self.file_list[self.file_idx].split('/')[-1].split('_')[:4])
+        frame_idx = int(self.file_list[self.file_idx].split('/')[-1].split('_')[5])
+        assert (event_id in self.event_id_list), "Queried event is not in the original metafile!"
+        # make changes to the copy of meta json file
+        try:
+            self.label_dict['data'][event_id]['event_label'] = self.event_label
+            self.label_dict['data'][event_id]['bbox_coords'][frame_idx] = (np.array(self.bbox_list[0])*np.array([1920/640, 1080/360])).tolist()
+        except:
+            pass
+        # allowing single event bbox for each frame, for now
+        print(f'{event_id}_frame_{frame_idx:d} labels changed and saved')
+        return
         
     
     def save_label_data(self):
@@ -166,16 +201,23 @@ def main():
     # Arguments
     parser = argparse.ArgumentParser()
     parser.add_argument('-d', '--data-folder-path', type=str, default='', required=True, help='data folder path')
-    parser.add_argument('-n', '--image-file-name', type=str, default='', required=True, help='name of the frame to load')
-    parser.add_argument('-s', '--json-save-path', type=str, default='', required=True, help='path to save the resulting label json file')
+    parser.add_argument('-p', '--prev-json-path', type=str, default='', required=True, help='path to previously saved meta json file')
+    parser.add_argument('-s', '--json-save-path', type=str, default='', required=True, help='path to save the manually-labled meta json file')
     args = parser.parse_args()
 
     root = tk.Tk()
     app = BoundingBoxApp(root, 
-                         folder_path=args.data_folder_path, 
+                         data_path=args.data_folder_path,
+                         prev_path=args.prev_json_path,
                          save_path=args.json_save_path)
     root.mainloop()
-
+    
 
 if __name__ == "__main__":
     main()
+
+# TO-DOs:
+    # copy the original meta json file and make changes to the copy
+    # print event label to event type convertion in text label in tkinter
+    # print the current event_id and frame_id in tkinter
+    # add functionality to visualize the manually labeled bbox in a new folder under data path
