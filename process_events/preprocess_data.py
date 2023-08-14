@@ -60,11 +60,11 @@ def preprocess(cal_data_path,
         # 100Hz session data, 500Hz session data, session offset data
         print(subprocess.run(["chmod", "+x", "/home/nano01/a/tao88/cav-mae/process_events/scripts/downloadSessionCsv.sh"]))
         subprocess.call("/home/nano01/a/tao88/cav-mae/process_events/scripts/downloadSessionCsv.sh {}".format(sessionIdStrs), shell=True)
-        print(subprocess.run(["chomd", "+x", "/home/nano01/a/tao88/cav-mae/process_events/scripts/downloadSessionuhfdCsv.sh"]))
+        print(subprocess.run(["chmod", "+x", "/home/nano01/a/tao88/cav-mae/process_events/scripts/downloadSessionuhfdCsv.sh"]))
         subprocess.call("/home/nano01/a/tao88/cav-mae/process_events/scripts/downloadSessionuhfdCsv.sh {}".format(sessionIdStrs), shell=True)
         print(subprocess.run(["chmod", "+x", "/home/nano01/a/tao88/cav-mae/process_events/scripts/downloadUnpackedSession.sh"]))
         subprocess.call("/home/nano01/a/tao88/cav-mae/process_events/scripts/downloadUnpackedSession.sh {}".format(sessionIdStrs), shell=True)
-        print(subprocess.run(["chomd", "+x", "/home/nano01/a/tao88/cav-mae/process_events/scripts/downloadEventList.sh"]))
+        print(subprocess.run(["chmod", "+x", "/home/nano01/a/tao88/cav-mae/process_events/scripts/downloadEventList.sh"]))
         subprocess.call("/home/nano01/a/tao88/cav-mae/process_events/scripts/downloadEventList.sh {}".format(sessionIdStrs), shell=True)
     # initiate road event data dict
     road_event_dict = {}

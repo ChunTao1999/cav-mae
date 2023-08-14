@@ -1,12 +1,12 @@
 CALIBRATE=1
 PERSPECTIVE=1
-DOWNLOAD_CSV=1
-PREPROCESS=1
+DOWNLOAD_CSV=0
+PREPROCESS=0
 SEED=0
 NUM_EPOCHS=1
-DATASET_JSONFILE_PATH=/home/nano01/a/tao88/RoadEvent-Dataset/datafiles/events_metafile.json
+DATASET_JSONFILE_PATH=/home/nano01/a/tao88/RoadEvent-Dataset/datafiles/events_metafile_8.3.json
 EVENTTYPE_JSON_PATH=/home/nano01/a/tao88/RoadEvent-Dataset/datafiles/event_types.json
-DATA_PATH=/home/nano01/a/tao88/RoadEvent-shared/CV/events_7.26
+DATA_PATH=/home/nano01/a/tao88/RoadEvent-shared/CV/events_8.3
 CAL_DATA_PATH=/home/nano01/a/tao88/RoadEvent-shared/CV/events_7.26
 DATASET_PATH=/home/nano01/a/tao88/RoadEvent-Dataset
 WHEELACCEL_TIME=1.024 # 512 samples 
