@@ -22,9 +22,9 @@ Download the mp4 file in the best video quality. Use the social media URL of the
 ```
 youtube-dl -f mp4/best -k -x <video-URL> (eg. https://youtu.be/uZOcBRa2YwI)
 ```
-···
+```
 yt-dlp -f "bv*[ext=mp4]+ba[ext=wav]/b[ext=mp4]" --audio-format wav --audio-quality 0 --postprocessor-args "-ar 16000" -k -x https://youtu.be/VE5uL9UPt6M
-···
+```
 If there's an issue downloading YouTube video, try:
 ```
 brew update
