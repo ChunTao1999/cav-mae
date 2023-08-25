@@ -12,7 +12,7 @@ import pdb # for debug
 
 
 class BoundingBoxApp:
-    def __init__(self, root, data_path, event_type_path, prev_path, save_path, image_frame_size):
+    def __init__(self, root, data_path, event_type_path, prev_path, save_path, image_frame_size, frames_per_event):
         self.root = root
         self.data_path = data_path
         self.event_type_path = event_type_path
@@ -21,6 +21,7 @@ class BoundingBoxApp:
         self.get_rv_files_list()
         self.prepare_json()
         self.frame_size = image_frame_size
+        self.frames_per_event = frames_per_event
         self.file_idx = 0
         self.canvas = None
         self.points = []
@@ -34,7 +35,7 @@ class BoundingBoxApp:
         dataFolderNames = [s for s in os.listdir(self.data_path) \
                         if (os.path.isdir(os.path.join(self.data_path, s)) and s.split('_')[-1].isnumeric())]
         self.sessionId_list = [s.split('_')[-1] for s in dataFolderNames]
-        self.file_list = glob.glob(os.path.join(self.data_path, "results", "frames_rv_manually_labeled", "*.png"))
+        self.file_list = glob.glob(os.path.join(self.data_path, "results", "frames_rv_annotated", "*.png"))
         self.file_list = natsorted(self.file_list)
         return 
     
@@ -60,6 +61,7 @@ class BoundingBoxApp:
         self.root.bind("p", self.load_prev_image)
         self.root.bind("n", self.load_next_image) # either clicking "Next" button or pressing "n" button on the keyboard
         self.root.bind("r", self.redo_bounding_boxes)
+        self.root.bind("d", self.remove_current_frame)
         default_font = font.nametofont("TkDefaultFont")
         default_font.configure(size=14)
 
@@ -70,16 +72,19 @@ class BoundingBoxApp:
             text="An interactive tool to tweak the automatically produced bounding box and provide an event type for road event data",
             wraplength=180  # Adjust this to control line wrapping
         )
-        entry_label = tk.Label(frm_left, text="Enter event type here:", font=("Helvetica", 16, "bold"))
+        entry_label = tk.Label(frm_left, text="Enter event type here:", font=("Helvetica", 14))
         self.e1 = tk.Entry(frm_left)
+        self.progress_label = tk.Label(frm_left, text="", font=("Helvetica", 14, "bold"))
+        self.progress_label.config(text='_'.join(self.file_list[self.file_idx].split('/')[-1].split('_')[:4]) + f"\n{(self.file_idx+1):d}/{len(self.file_list)}", 
+                                   fg="black")
         self.event_type_labels = [
             tk.Label(frm_left, text="Pothole", font=("Helvetica", 12)),
             tk.Label(frm_left, text="Manhole Cover", font=("Helvetica", 12)),
             tk.Label(frm_left, text="Drain Gate", font=("Helvetica", 12)),
-            tk.Label(frm_left, text="Frost Heave", font=("Helvetica", 12)),
+            tk.Label(frm_left, text="Unknown", font=("Helvetica", 12)),
             tk.Label(frm_left, text="Speed Bump", font=("Helvetica", 12))
         ]
-        self.event_type_labels_locs = [[10, 220], [100, 220], [10, 250], [100, 250], [10, 280]]
+        self.event_type_labels_locs = [[10, 260], [100, 260], [10, 290], [100, 290], [10, 320]]
         for idx, label in enumerate(self.event_type_labels):
             label.bind("<Button-1>", lambda event, idx=idx: self.select_event_type(event, idx))
             label.place(x=self.event_type_labels_locs[idx][0], y=self.event_type_labels_locs[idx][1])
@@ -100,8 +105,13 @@ class BoundingBoxApp:
             frm_left, text="Redo"
         )
         self.redo_button.bind("<Button-1>", self.redo_bounding_boxes)
+        self.remove_button = tk.Button(
+            frm_left, text="Remove Frame"
+        )
+        self.remove_button.bind("<Button-1>", self.remove_current_frame)
+
         self.message_label = tk.Label(frm_left, text="", fg="green", wraplength=180, font=("Helvetica", 12))
-        self.message_label.place(x=10, y=410)
+        self.message_label.place(x=10, y=490)
 
         # Right frame
         frm_right = tk.Frame(
@@ -115,11 +125,13 @@ class BoundingBoxApp:
         intro_label.pack()  # Place the introduction label at the top
         entry_label.pack()
         self.e1.pack()
+        self.progress_label.pack()
         # or use pack() with padx and pady
-        self.prev_button.place(x=10, y=320)
-        self.next_button.place(x=100,y=320)
-        self.save_button.place(x=10, y=360)
-        self.redo_button.place(x=100, y=360)
+        self.prev_button.place(x=10, y=360)
+        self.next_button.place(x=100,y=360)
+        self.save_button.place(x=10, y=400)
+        self.redo_button.place(x=100, y=400)
+        self.remove_button.place(x=10, y=440)
 
         frm_left.grid(row=0, column=0, sticky="ns")
         frm_right.grid(row=0, column=1, sticky="nsew")
@@ -201,18 +213,36 @@ class BoundingBoxApp:
         self.e1.delete(0, tk.END) # update the entry field to clear the previous event type
         for idx, label in enumerate(self.event_type_labels):
             label.config(fg="black")
+        self.progress_label.config(text='_'.join(self.file_list[self.file_idx].split('/')[-1].split('_')[:4]) + f"\n{(self.file_idx+1):d}/{len(self.file_list)}", 
+                                   fg="black")
+    
+
+    def remove_current_frame(self, event):
+        event_id = '_'.join(self.file_list[self.file_idx].split('/')[-1].split('_')[:4])
+        frame_idx = int(self.file_list[self.file_idx].split('/')[-1].split('_')[5])
+        assert (event_id in self.event_id_list), "Queried event is not in the original metafile!"
+        # remove current frame and its bbox coords from self.label_dict['data']
+        del self.label_dict['data'][event_id]['frame_paths'][frame_idx-(self.frames_per_event-len(self.label_dict['data'][event_id]['frame_paths']))]
+        del self.label_dict['data'][event_id]['bbox_coords'][frame_idx-(self.frames_per_event-len(self.label_dict['data'][event_id]['frame_paths']))]
+        if len(self.label_dict['data'][event_id]['frame_paths']) == 0:
+            del self.label_dict['data'][event_id]
+        # remove current frame from self.file_list too, and reverse the file index to load the next frame in the updated self.file_list
+        del self.file_list[self.file_idx]
+        self.file_idx -= 1
+        # load the new image
+        self.load_next_image(event)
 
 
     def save_annotations(self, event):
         # save self.event_label, and self.bbox_list
-        if len(self.e1.get()) > 0:
-            self.event_label = self.e1.get()
-        else:
-            pass
         event_id = '_'.join(self.file_list[self.file_idx].split('/')[-1].split('_')[:4])
         frame_idx = int(self.file_list[self.file_idx].split('/')[-1].split('_')[5])
         assert (event_id in self.event_id_list), "Queried event is not in the original metafile!"
 
+        if len(self.e1.get()) > 0:
+            self.event_label = self.e1.get()
+        else:
+            pass
         # make changes to the copy of meta json file if needed 
         if len(self.event_label) > 0:
             self.label_dict['data'][event_id]['event_label'] = self.event_label
@@ -247,8 +277,9 @@ def main():
     parser.add_argument('-e', '--event-type-path', type=str, default='', required=True, help='path to event label to event type convertion')
     parser.add_argument('-s', '--json-save-path', type=str, default='', required=True, help='path to save the manually-labled meta json file')
     parser.add_argument('-f', '--frame-size', type=int, nargs='+', required=True, help='the frame size of image to edit')
+    parser.add_argument('-n', '--frames-per-event', type=int, default=3, required=True, help='number of frames per event in the current folder')
     args = parser.parse_args()
-    args.json_save_path = os.path.join(args.prev_json_path.split('/')[:-1], f"events_metafile_manually_labeled_{args.data_folder_path.split('/')[-1].split('_')[-1]}.json")
+    # args.json_save_path = os.path.join('/'.join(args.prev_json_path.split('/')[:-1]), f"events_metafile_manually_labeled_{args.data_folder_path.split('/')[-1].split('_')[-1]}.json")
 
     root = tk.Tk()
     app = BoundingBoxApp(root, 
@@ -256,7 +287,8 @@ def main():
                          event_type_path=args.event_type_path,
                          prev_path=args.prev_json_path,
                          save_path=args.json_save_path,
-                         image_frame_size=args.frame_size)
+                         image_frame_size=args.frame_size,
+                         frames_per_event=args.frames_per_event)
     root.mainloop()
     
 

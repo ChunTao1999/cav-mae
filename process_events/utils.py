@@ -9,6 +9,7 @@ import numpy as np
 import os
 import pandas as pd
 import subprocess
+from matplotlib.ticker import PercentFormatter
 import pdb # for debug
 
 
@@ -109,6 +110,7 @@ def compute_event_loc_dist_curves(event_timeoffset,
                                   ym_per_pix,
                                   resmatrix_inv,
                                   resmatrix):
+    """Rotate and extend the vertical distance, iteratively"""
     start_idx = bisect.bisect_left(veh_speed.iloc[:,0], event_timeoffset)
     end_idx = bisect.bisect_right(veh_speed.iloc[:,0], frame_timeoffset)
     # compute end_idx by distance
@@ -162,6 +164,76 @@ def compute_event_loc_dist_curves(event_timeoffset,
     return pts_bev_rotated, pts_inv, accum_boxcenter
 
 
+def compute_event_loc_dist_curves_2(event_timeoffset,
+                                    event_left,
+                                    event_right,
+                                    event_len_pix,
+                                    frame_image,
+                                    frame_dim,
+                                    frame_timeoffset,
+                                    frame_dist,
+                                    wheel_to_base_dist,
+                                    base_pixel,
+                                    wheel_width,
+                                    veh_speed,
+                                    veh_yawrate,
+                                    xm_per_pix,
+                                    ym_per_pix,
+                                    resmatrix_inv,
+                                    resmatrix):
+    """Second method: map the car's trajectories in BEV"""
+    start_idx = bisect.bisect_left(veh_speed.iloc[:,0], event_timeoffset)
+    end_idx = bisect.bisect_right(veh_speed.iloc[:,0], frame_timeoffset)
+    speed_vec, yawrate_vec = veh_speed[start_idx:end_idx].to_numpy(), \
+                             veh_yawrate[start_idx:end_idx].to_numpy()
+    if event_left==1 and event_right==0:
+        current_boxcenter = np.array([frame_dim[0]/2+wheel_width/2/xm_per_pix, frame_dim[1]-base_pixel+wheel_to_base_dist/ym_per_pix])
+    elif event_left==0 and event_right==1:
+        current_boxcenter = np.array([frame_dim[0]/2-wheel_width/2/xm_per_pix, frame_dim[1]-base_pixel+wheel_to_base_dist/ym_per_pix])
+    else: # both 1s
+        current_boxcenter = np.array([frame_dim[0]/2, frame_dim[1]-base_pixel+wheel_to_base_dist/ym_per_pix])
+    accum_boxcenter = [current_boxcenter]
+    # yawrate in radians/sec, positive for left turn, negative for right turn
+    headings = np.cumsum(yawrate_vec[:,1]*0.01)
+    headings -= headings[-1]
+    headings += np.pi / 2 # vertical up is pi/2 radians
+    # cum_x_shift = np.sum(np.cos(headings)*speed_vec[:,1]*0.01) # in meters
+    # cum_y_shift = -np.sum(np.sin(headings)*speed_vec[:,1]*0.01) # in meters
+    # pixel_x_shift = cum_x_shift / xm_per_pix
+    # pixel_y_shift = cum_y_shift / ym_per_pix
+    # final_boxcenter = current_boxcenter + np.array([pixel_x_shift, pixel_y_shift])
+    for vec_idx in np.arange(len(speed_vec))[::-1]:
+        current_boxcenter[0] += (np.cos(headings[vec_idx])*speed_vec[:,1][vec_idx]*0.01)/xm_per_pix
+        current_boxcenter[1] -= (np.sin(headings[vec_idx])*speed_vec[:,1][vec_idx]*0.01)/ym_per_pix
+        accum_boxcenter.append(copy.deepcopy(current_boxcenter))
+    pts_bev = np.float32([[current_boxcenter[0]-event_len_pix/2, current_boxcenter[1]-event_len_pix/2], # topleft
+                          [current_boxcenter[0]+event_len_pix/2, current_boxcenter[1]-event_len_pix/2], # topright
+                          [current_boxcenter[0]-event_len_pix/2, current_boxcenter[1]+event_len_pix/2], # bottomleft
+                          [current_boxcenter[0]+event_len_pix/2, current_boxcenter[1]+event_len_pix/2]]) # bottomright
+    # pts_bev = np.clip(pts_bev, 10, 590) 
+    # pts_inv = cv2.perspectiveTransform(np.float32([pts_bev]), resmatrix_inv)[0]
+    # point_rotate = cv2.perspectiveTransform(np.float32([[current_boxcenter]]), resmatrix_inv)[0][0]
+    # pts_inv_rotated = np.zeros_like(pts_inv)
+    # for idx, point in enumerate(pts_inv):
+    #     rotated_point = rotate(origin=point_rotate,
+    #                            point=point,
+    #                            angle=np.pi/2 - headings[0],
+    #                            aspect_ratio=1)
+    #     pts_inv_rotated[idx] = rotated_point
+    # pts_bev_rotated = cv2.perspectiveTransform(np.float32([pts_inv_rotated]), resmatrix)[0] # (4,2)
+    # pts_bev_rotated = np.clip(pts_bev_rotated, 10, 590)
+    pts_bev_rotated = np.zeros_like(pts_bev)
+    for idx, point in enumerate(pts_bev):
+        rotated_point = rotate(origin=current_boxcenter,
+                               point=point,
+                               angle=(np.pi/2 - headings[0])*(8.8/4.318),
+                               aspect_ratio=8.8/4.318)
+        pts_bev_rotated[idx] = rotated_point
+    pts_bev_rotated = np.clip(pts_bev_rotated, 10, 590)
+    pts_inv_rotated = cv2.perspectiveTransform(np.float32([pts_bev_rotated]), resmatrix_inv)[0]
+    return pts_bev_rotated, pts_inv_rotated, accum_boxcenter
+
+
 def rotate(origin, point, angle, aspect_ratio): # angle in radians
     """Rotate a point cclw by a given angle around a given origin point"""
     ox, oy = origin
@@ -204,3 +276,89 @@ def boox_coords_to_bbox_label(pts_inv):
 def normalize_wheel_accel(wheelAccel_seg, v_peak, v_nom):
     wheelAccel_seg /= np.square(v_peak/v_nom)
     return wheelAccel_seg
+
+
+def plot_image(batch_imgs, gt_bboxes, gt_labels, pred_bboxes, pred_labels, label_dict, save_path):
+    """Used during training and inference to visualize bbox regression and label classification progress"""
+    fig, axes = plt.subplots(nrows=2, ncols=2, figsize=(50, 10))
+    plt.subplots_adjust(wspace=0, hspace=0)
+    batch_imgs = batch_imgs.detach().cpu()
+    gt_bboxes = gt_bboxes.detach().cpu()
+    gt_labels = gt_labels.detach().cpu()
+    pred_bboxes = pred_bboxes.detach().cpu()
+    pred_labels = pred_labels.detach().cpu()
+
+    for j in range(batch_imgs.shape[0]):
+        image_arr = batch_imgs[j].permute(1,2,0).numpy()
+        debug_img = (image_arr * 255).astype(np.uint8).copy()
+        gt_bbox = np.array(gt_bboxes[j], np.int32).reshape((-1, 1, 2))
+        gt_bbox = gt_bbox[:, :, [1,0]] # reverse width and height
+        gt_bbox = gt_bbox[[0,1,3,2], :, :] # order of traversal these points
+        gt_label = str(gt_labels.tolist()[j])
+        pred_label = str(pred_labels.tolist()[j])
+
+        pred_bbox = np.array(pred_bboxes[j], np.int32).reshape((-1, 1, 2))
+        pred_bbox = pred_bbox[:, :, [1,0]]
+        pred_bbox = pred_bbox[[0,1,3,2], :, :]
+
+        img_annotated = cv2.polylines(img=debug_img,
+                                      pts=[gt_bbox],
+                                      isClosed=True,
+                                      color=[255,255,255],
+                                      thickness=5)
+        img_annotated = cv2.polylines(img=img_annotated,
+                                      pts=[pred_bbox],
+                                      isClosed=True,
+                                      color=[255,255,0],
+                                      thickness=5)
+        img_annotated = cv2.putText(img_annotated,
+                                    label_dict[gt_label],
+                                    (10, 20),
+                                    cv2.FONT_HERSHEY_SIMPLEX, 
+                                    0.7, 
+                                    (255,255,255),
+                                    3)
+        img_annotated = cv2.putText(img_annotated,
+                                    label_dict[pred_label],
+                                    (10, 50),
+                                    cv2.FONT_HERSHEY_SIMPLEX, 
+                                    0.7, 
+                                    (255,255,0),
+                                    3)
+
+        axes[j//2][j%2].imshow(img_annotated)
+    
+    fig.tight_layout()
+    plt.savefig(save_path)
+    plt.close()
+    return
+
+
+def plot_loss_curves(exp_path):
+    train_loss_tally = np.load(os.path.join(exp_path, "train_loss.npy"))
+    test_loss_tally = np.load(os.path.join(exp_path, "test_loss.npy"))
+    # train_acc_tally = np.load(os.path.join(exp_path, "train_acc.npy"))
+    # test_acc_tally = np.load(os.path.join(exp_path, "test_acc.npy"))
+    fig, ax1 = plt.subplots()
+    ax1.plot(np.arange(len(train_loss_tally)), train_loss_tally, 'b-', linewidth=2.0, label='Train loss')
+    ax1.plot(np.arange(len(test_loss_tally))*len(train_loss_tally)//len(test_loss_tally), test_loss_tally, 'r-', linewidth=2.0, label='Test loss')
+    ax1.set_ylabel('Loss', color=(139/255, 69/255, 19/255), fontsize=12) # brown
+    ax1.tick_params('y', color=(139/255, 69/255, 19/255))
+    ax1.set_xlabel('Iteration', color=(139/255, 69/255, 19/255), fontsize=12)
+    ax1.tick_params('x', color=(139/255, 69/255, 19/255))
+    # ax2 = ax1.twinx()
+    # ax2.plot(np.arange(len(train_acc_tally))*len(train_loss_tally)//len(test_loss_tally), train_acc_tally, 'b-', linewidth=2.0, label='Train acc')
+    # ax2.plot(np.arange(len(test_acc_tally))*len(train_loss_tally)//len(test_loss_tally), test_acc_tally, 'r-', linewidth=2.0, label='Test acc')
+    # ax2.set_ylabel('Accuracy', color=(139/255, 69/255, 19/255), fontsize=12)
+    # ax2.tick_params('y', color=(139/255, 69/255, 19/255))
+    # ax2.yaxis.set_major_formatter(PercentFormatter(xmax=1.0, decimals=0))
+    lines, labels = ax1.get_legend_handles_labels()
+    ax1.legend(lines, labels, loc='upper right')
+    # lines2, labels2 = ax2.get_legend_handles_labels()
+    # ax2.legend(lines + lines2, labels + labels2, loc='upper right')
+    plt.title('Loss and Accuracy', fontsize=14)
+    plt.tight_layout()
+    plt.savefig(os.path.join(exp_path, "loss_acc.png"))
+    plt.close()
+    return
+        

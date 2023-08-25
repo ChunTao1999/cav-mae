@@ -5,7 +5,7 @@ import pandas as pd
 import os
 import subprocess
 import matplotlib.pyplot as plt
-from utils import compute_event_loc_dist_curves, add_bbox_to_frame, add_accum_boxcenter, boox_coords_to_bbox_label, normalize_wheel_accel
+from utils import compute_event_loc_dist_curves, compute_event_loc_dist_curves_2, add_bbox_to_frame, add_accum_boxcenter, boox_coords_to_bbox_label, normalize_wheel_accel
 import pdb # for debug
 
 
@@ -17,6 +17,7 @@ def preprocess(cal_data_path,
                eventmarking_conf, 
                eventType_json_path,
                download=True, 
+               plot_veh_speed_yawrate=False,
                plot_wheelAccel=True,
                plot_processedFrames=True):
     """
@@ -43,6 +44,9 @@ def preprocess(cal_data_path,
     origFrame_imsave_rv_path = os.path.join(save_path, 'frames_rv')
     if not os.path.exists(origFrame_imsave_rv_path):
         os.makedirs(origFrame_imsave_rv_path)
+    sessionInfo_save_path = os.path.join(data_path, 'results', 'session_info')
+    if not os.path.exists(sessionInfo_save_path):
+        os.makedirs(sessionInfo_save_path)
     processedFrame_imsave_rv_path = os.path.join(data_path, 'results', 'frames_rv_annotated')
     if not os.path.exists(processedFrame_imsave_rv_path):
         os.makedirs(processedFrame_imsave_rv_path)
@@ -84,6 +88,27 @@ def preprocess(cal_data_path,
         # extract speed and yawrate columns from 100Hz sessiond data
         veh_speed, veh_yawrate = sessionData_100.loc[:, ['time_offset', 'speed']], \
                                  sessionData_100.loc[:, ['time_offset', 'yaw_rate']]
+        if plot_veh_speed_yawrate:
+            for idx, session_col in enumerate([veh_speed, veh_yawrate, sessionData_500['rlWheelAccel'], sessionData_500['rrWheelAccel']]):
+                plt.figure()
+                if idx == 0 or idx == 1:
+                    plt.plot(session_col.iloc[:,0], session_col.iloc[:,1])
+                else:
+                    plt.plot(np.arange(session_col.shape[0])*0.002, session_col)
+                if idx == 0: 
+                    plt.title(f'session {session_id} speed')
+                    plt.savefig(os.path.join(sessionInfo_save_path, f'session_{session_id}_speed.png'))
+                elif idx == 1: 
+                    plt.title(f'session {session_id} yawrate')
+                    plt.savefig(os.path.join(sessionInfo_save_path, f'session_{session_id}_yawrate.png'))
+                elif idx == 2:
+                    plt.title(f'session {session_id} rlWheelAccel')
+                    plt.savefig(os.path.join(sessionInfo_save_path, f'session_{session_id}_rlWheelAccel.png'))
+                else:
+                    plt.title(f'session {session_id} rrWheelAccel')
+                    plt.savefig(os.path.join(sessionInfo_save_path, f'session_{session_id}_rrWheelAccel.png'))
+                plt.close()
+
         veh_speed.iloc[:,0] += float(session_timeShift)
         veh_yawrate.iloc[:,0] += float(session_timeShift)
         session_eventDict = {}
@@ -107,6 +132,7 @@ def preprocess(cal_data_path,
             event_end_idx = int(event_start_idx + num_samples)
             event_start_idx_100, event_end_idx_100 = int((event_timestamp - session_timeShift - wheelAccel_conf['timespan']/2)*100), \
                                                      int((event_timestamp - session_timeShift + wheelAccel_conf['timespan']/2)*100)
+            print('Event:', str(session_id), str(format(event_timestamp, '.3f')))
             event_label = session_eventDict[float(format(event_timestamp, '.3f'))][0]
             road_event_dict['data'][event_id]['event_label'] = str(event_label)
             road_event_dict['data'][event_id]['event_type'] = eventType_json_data[str(event_label)]
@@ -133,6 +159,7 @@ def preprocess(cal_data_path,
             road_event_dict['data'][event_id]['wheelAccel_path'] = os.path.join(wheelAccel_save_path, f'wheelAccel_session_{session_id:d}_event_{event_timestamp:.3f}.npy')
             # process the wheelAccel segs to transform into spectrograms
             plt.figure()
+            # 8.22: need to adjust the spectrogram for road events that happen on both left and right sides
             spectrum, freqs, t_bins, im = plt.specgram(x=wheelAccel_seg, 
                                                        NFFT=wheelAccel_conf['N_windows_fft'], 
                                                        noverlap=wheelAccel_conf['noverlap'], # can add some overlap
@@ -172,7 +199,7 @@ def preprocess(cal_data_path,
                 frame = cv2.undistort(frame, mtx, dist)
                 road_event_dict['data'][event_id]['frame_paths'].append(os.path.join(origFrame_imsave_rv_path, frame_name))
                 cv2.imwrite(os.path.join(origFrame_imsave_rv_path, frame_name), frame)
-                pts_bev, pts_inv, accum_boxcenter = compute_event_loc_dist_curves(event_timeoffset=event_timestamp+eventmarking_conf['event_timestamp_shift'],
+                pts_bev, pts_inv, accum_boxcenter = compute_event_loc_dist_curves_2(event_timeoffset=event_timestamp+eventmarking_conf['event_timestamp_shift'],
                                                                                   event_left=session_eventDict[float(format(event_timestamp, '.3f'))][1],
                                                                                   event_right=session_eventDict[float(format(event_timestamp, '.3f'))][2],
                                                                                   frame_image=frame,
