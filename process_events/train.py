@@ -323,7 +323,7 @@ np.save(os.path.join(exp_path, "test_acc.npy"), np.array(test_acc_tally))
 plot_loss_curves(exp_path)
 
 # save model
-torch.save(model.state_dict(), os.path.join(exp_path, f"EventNNv1do_{args.num_epochs}_{args.learning_rate}.pth"))
+torch.save(model.state_dict(), os.path.join(exp_path, f"{args.num_epochs}_{args.learning_rate}.pth"))
 print("Train and test finished!")
 
 
