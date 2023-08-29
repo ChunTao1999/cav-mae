@@ -21,11 +21,13 @@ import torchvision.transforms as T
 from dataloader_events import RoadEventDataset
 from preprocess_data import preprocess
 from utils import calibrate_camera, define_perspective_transform, plot_image, plot_loss_curves
+from utils import polygon_area, compute_intersection_area, compute_union_area
 from models import EventNN, ModifiedResNet18
 from torchsummary import summary
 from sklearn.metrics import confusion_matrix
 import seaborn as sns
 import pdb # debug
+
 
 #%% Arguments
 parser = argparse.ArgumentParser()
@@ -182,6 +184,15 @@ def initialize_weights(m):
       nn.init.kaiming_uniform_(m.weight.data)
       nn.init.constant_(m.bias.data, 0)
 
+# IOU loss function
+def iou_loss(predicted_polygons, target_polygons):
+    intersection_areas = compute_intersection_area(predicted_polygons, target_polygons).to(device)
+    union_areas = compute_union_area(predicted_polygons, target_polygons, intersection_areas)
+    iou_scores = intersection_areas / (union_areas + 1e-6)  # Add epsilon to avoid division by zero
+    loss = 1 - iou_scores  # Minimize the distance between 1 and IOU to maximize IOU
+    return loss
+
+
 # Create model
 # model = EventNN()
 # model.apply(initialize_weights)
@@ -205,9 +216,9 @@ criterion_reg = nn.MSELoss() # switch to IOU loss later
 # class_weights = class_weights.to(device)
 criterion_cls = nn.CrossEntropyLoss()
 optimizer = optim.Adam(model.parameters(), lr=args.learning_rate, betas=args.betas, eps=args.eps, weight_decay=args.weight_decay, amsgrad=False)
-scheduler = ExponentialLR(optimizer, gamma=0.9)
+scheduler = ExponentialLR(optimizer, gamma=1) # pick gamma less than 1
 print("\nStart Event Detection and Classification Training......\n")
-exp_name = f"EventResnetreg_{args.num_epochs}_{args.learning_rate}_new"
+exp_name = f"EventResnetreg_{args.num_epochs}_{args.learning_rate}_iou"
 exp_path = os.path.join(args.model_save_path, exp_name)
 if not os.path.exists(exp_path): os.makedirs(exp_path)
 # if args.resume_from_checkpoint==0:
@@ -234,9 +245,14 @@ for epoch_idx, epoch in enumerate(range(args.num_epochs)):
         optimizer.zero_grad()
         # out_reg, out_cls = model([spec, img])
         out_reg = model(img)
+        out_reg = torch.clamp(out_reg, 0, 255)
         # out_reg, out_cls = out_all[:, :8], out_all[:, -5:]
 
-        loss_reg = criterion_reg(out_reg, bbox)
+        # loss_reg = criterion_reg(out_reg, bbox)
+        # pdb.set_trace()
+        loss_reg = iou_loss(out_reg, bbox).mean()
+        # pdb.set_trace()
+
         # loss_cls = criterion_cls(out_cls, event_label)
         # loss_reg.backward(retain_graph=True)
         # loss_cls.backward()
@@ -277,9 +293,11 @@ for epoch_idx, epoch in enumerate(range(args.num_epochs)):
             event_label, bbox = data[2].to(device), data[3].float().to(device)
             # out_reg, out_cls = model([spec, img])
             out_reg = model(img)
+            out_reg = torch.clamp(out_reg, 0, 255)
             # out_reg, out_cls = out_all[:, :8], out_all[:, -5:]
 
-            loss_reg = criterion_reg(out_reg, bbox)
+            # loss_reg = criterion_reg(out_reg, bbox)
+            loss_reg = iou_loss(out_reg, bbox).mean()
             # loss_cls = criterion_cls(out_cls, event_label)
             # loss = loss_reg + loss_cls
             loss = loss_reg

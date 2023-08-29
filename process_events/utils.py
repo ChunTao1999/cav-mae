@@ -9,7 +9,10 @@ import numpy as np
 import os
 import pandas as pd
 import subprocess
+import torch
+import torch.nn.functional as nnF
 from matplotlib.ticker import PercentFormatter
+from scipy.spatial import ConvexHull
 import pdb # for debug
 
 
@@ -361,4 +364,48 @@ def plot_loss_curves(exp_path):
     plt.savefig(os.path.join(exp_path, "loss_acc.png"))
     plt.close()
     return
-        
+
+
+def polygon_area(vertices):
+    """"
+    Calculate the polygon area using the Shoelace formula
+    Args: vertices (Tensor): shape (num_vertices, 2), ordered either in cloc
+    Returns: area (Tensor): area of the polygon
+    """
+    x, y = vertices[:,0], vertices[:,1]
+    area = 0.5 * torch.abs(torch.sum(x[:-1] * y[1:]) + x[-1] * y[0] - torch.sum(y[:-1] * x[1:]) - y[-1] * x[0])
+    return area
+
+
+def compute_intersection_area(pred_vertices, target_vertices):
+    """
+    Calculate intersection area between pairs of predicted and target polygon indices
+    Args: pred_vertices (Tensor): predicted poly indices, shape (batch_size, num_vertices=4, 2)
+          target_vertices (Tensor): targeted poly indices, shape (batch_size, num_vertices=4, 2)
+    Returns: intersection_areas (Tensor): shape (batch_size, )
+    """
+    bs = pred_vertices.shape[0]
+    intersection_areas = torch.zeros(bs)
+    pred_vertices = pred_vertices.view(bs, -1, 2) # (bs, 4, 2)
+    target_vertices = target_vertices.view(bs, -1, 2)
+    # for each data sample
+    for i in range(bs):
+        # try:
+        area1 = polygon_area(pred_vertices[i])
+        area2 = polygon_area(target_vertices[i])
+        intersection_vertices = torch.cat([pred_vertices[i], target_vertices[i]])
+        # intersection_vertices = torch.tensor(intersection_vertices[ConvexHull(intersection_vertices.clone().detach().numpy()).vertices])
+        intersection_area = polygon_area(intersection_vertices)
+        intersection_area = torch.min(intersection_area, torch.min(area1, area2))
+        intersection_areas[i] = intersection_area
+    return intersection_areas
+
+
+def compute_union_area(pred_vertices, target_vertices, intersection_areas):
+    """
+    Calculate union area
+    """
+    total_areas_predicted = torch.stack([polygon_area(poly.view(-1, 2)) for poly in pred_vertices])
+    total_areas_target = torch.stack([polygon_area(poly.view(-1, 2)) for poly in target_vertices])
+    union_areas = total_areas_predicted + total_areas_target - intersection_areas
+    return union_areas
