@@ -1,4 +1,5 @@
 # Author: Chun Tao
+# Date: 8.1.2023
 
 #%% Imports
 import argparse
@@ -20,7 +21,7 @@ from torch.utils.data import Dataset, DataLoader, random_split
 import torchvision.transforms as T
 from dataloader_events import RoadEventDataset
 from preprocess_data import preprocess
-from utils import calibrate_camera, define_perspective_transform, plot_image, plot_loss_curves
+from utils import calibrate_camera, define_perspective_transform, plot_image, plot_conf_matrix, save_loss_tallies, plot_loss_curves
 from utils import polygon_area, compute_intersection_area, compute_union_area
 from models import EventNN, ModifiedResNet18
 from torchsummary import summary
@@ -52,6 +53,7 @@ parser.add_argument('--betas', type=tuple, default=(0.9, 0.999), required=False,
 parser.add_argument('--eps', type=float, default=1e-8, required=False, help='adam eps')
 parser.add_argument('--weight-decay', type=float, default=1e-3, required=False, help='adam weight decay')
 parser.add_argument('--model-save-path', type=str, default='', required=True, help='path to save the trained model parameters')
+parser.add_argument('--train-mode', type=str, choices=['only_reg', 'only_cls', 'reg_and_cls'], default='reg_and_cls', required=False, help='define which tasks to perform in training')
 args = parser.parse_args()
 
 
@@ -129,7 +131,6 @@ if args.preprocess==0:
                plot_processedFrames=True)
 else:
     print("\nPreprocess: transforming wheelAccel to spectrogram and marking events in the frames skipped, using existing dataset......")
-# pdb.set_trace()
 
 
 #%% RoadEvent Dataset
@@ -170,7 +171,7 @@ with open('./event_types_manual_label.json', 'r') as f:
     eventType_dict = json.load(f)
 
 
-#%% Training and validation loop
+#%% Training and test loops
 # model init function
 def initialize_weights(m):
   if isinstance(m, nn.Conv2d):
@@ -192,15 +193,20 @@ def iou_loss(predicted_polygons, target_polygons):
     loss = 1 - iou_scores  # Minimize the distance between 1 and IOU to maximize IOU
     return loss
 
+if args.train_mode == "reg_and_cls":
+    num_classes = 13
+elif args.train_mode == "only_reg":
+    num_classes = 8
+else: # "only_cls"
+    num_classes = 5
 
 # Create model
 # model = EventNN()
 # model.apply(initialize_weights)
 # model = torchvision.models.resnet18(pretrained=True)
-# num_classes = 5
 # model.fc = torch.nn.Linear(in_features=512, out_features=num_classes)
 pretrained_dict = torchvision.models.resnet18(pretrained=True).state_dict()
-model = ModifiedResNet18(num_classes=8)
+model = ModifiedResNet18(num_classes=num_classes)
 model_dict = model.features.state_dict()
 pretrained_dict = {k: v for k, v in pretrained_dict.items() if k in model_dict}
 model_dict.update(pretrained_dict)
@@ -208,17 +214,15 @@ model.features.load_state_dict(model_dict)
 model.fc.apply(initialize_weights)
 model = model.to(device)
 print(model)
-# pdb.set_trace()
 
 criterion_reg = nn.MSELoss() # switch to IOU loss later
-# class_weights = torch.tensor([0.2, 0.21, 0.23, 0.12, 0.24])
-# class_weights = torch.tensor([0.2, 0.2, 0.2, 0.2, 0.2])
-# class_weights = class_weights.to(device)
-criterion_cls = nn.CrossEntropyLoss()
+class_weights = torch.tensor([0.2, 0.2, 0.2, 0.2, 0.2])
+class_weights = class_weights.to(device)
+criterion_cls = nn.CrossEntropyLoss(weight=class_weights)
 optimizer = optim.Adam(model.parameters(), lr=args.learning_rate, betas=args.betas, eps=args.eps, weight_decay=args.weight_decay, amsgrad=False)
 scheduler = ExponentialLR(optimizer, gamma=1) # pick gamma less than 1
 print("\nStart Event Detection and Classification Training......\n")
-exp_name = f"EventResnetreg_{args.num_epochs}_{args.learning_rate}_iou"
+exp_name = f"EventResnet_{args.num_epochs}_{args.learning_rate}_{args.train_mode}"
 exp_path = os.path.join(args.model_save_path, exp_name)
 if not os.path.exists(exp_path): os.makedirs(exp_path)
 # if args.resume_from_checkpoint==0:
@@ -230,6 +234,7 @@ train_acc_tally = []
 test_acc_tally = []
 for epoch_idx, epoch in enumerate(range(args.num_epochs)):
     print(f"Epoch {epoch_idx+1:d}/{args.num_epochs:d}")
+    
     # Train loop
     model.train()
     epoch_loss_reg_train = 0.0
@@ -240,45 +245,54 @@ for epoch_idx, epoch in enumerate(range(args.num_epochs)):
         spec, img = data[0].float().to(device), data[1].float().to(device) # spec (bs, 1, 17, 31); img (bs, 3, 256, 256)
         # get label data
         event_label, bbox = data[2].to(device), data[3].float().to(device)
+        # 8.30: optional: approximate quadragon bboxes by rectangles
 
         # feedforward
         optimizer.zero_grad()
-        # out_reg, out_cls = model([spec, img])
-        out_reg = model(img)
-        out_reg = torch.clamp(out_reg, 0, 255)
-        # out_reg, out_cls = out_all[:, :8], out_all[:, -5:]
-
-        # loss_reg = criterion_reg(out_reg, bbox)
-        # pdb.set_trace()
-        loss_reg = iou_loss(out_reg, bbox).mean()
-        # pdb.set_trace()
-
-        # loss_cls = criterion_cls(out_cls, event_label)
-        # loss_reg.backward(retain_graph=True)
-        # loss_cls.backward()
-        # loss = loss_reg + loss_cls
-        loss = loss_reg
+        if args.train_mode == "reg_and_cls":
+            out_reg, out_cls = model([spec, img])
+            out_reg = torch.clamp(out_reg, 0, 255)
+            loss_reg = criterion_reg(out_reg, bbox)
+            loss_cls = criterion_cls(out_cls, event_label)
+            loss = loss_reg + loss_cls
+        elif args.train_mode == "only_reg":
+            out_reg = model(img)
+            out_reg = torch.clamp(out_reg, 0, 255)
+            loss_reg = criterion_reg(out_reg, bbox)
+            # loss_reg = iou_loss(out_reg, bbox).mean()
+            loss = loss_reg
+        else: # "only_cls"
+            out_cls = model(img)
+            loss_cls = criterion_cls(out_cls, event_label)
+            loss = loss_cls
+       
         loss.backward()
         # nn.utils.clip_grad_norm_(model.parameters(), 1.0)
         optimizer.step()
-        epoch_loss_reg_train += loss_reg.item()
-        # epoch_loss_cls_train += loss_cls.item()
+
+        # accumulate iteration loss
+        if args.train_mode == "reg_and_cls" or args.train_mode == "only_reg":
+            epoch_loss_reg_train += loss_reg.item()
+        if args.train_mode == "reg_and_cls" or args.train_mode == "only_cls":
+            epoch_loss_cls_train += loss_cls.item()
+            _, predicted = torch.max(out_cls, 1)
+            num_correct += sum(predicted==event_label).item()
         train_loss_tally.append(loss.item())
 
-        # _, predicted = torch.max(out_cls, 1)
-        # num_correct += sum(predicted==event_label).item()
+        # iteration printouts
         if (batch_idx+1) % 10 == 0:
             print(f"\t{batch_idx+1}/{len(train_dataloader)}")
-        if (batch_idx+1) == 20:
-            plot_image(img[:4], bbox[:4], event_label[:4], out_reg[:4], event_label[:4], eventType_dict, os.path.join(exp_path, f"epoch_{epoch_idx+1}.png"))
+        if args.train_mode == "reg_and_cls":
+            if (batch_idx+1) == 20:
+                plot_image(img[:4], bbox[:4], event_label[:4], out_reg[:4], out_cls[:4], eventType_dict, os.path.join(exp_path, f"epoch_{epoch_idx+1}.png"))
+   
     scheduler.step()
     acc_cls = num_correct / train_size
     train_acc_tally.append(acc_cls)
-    # print(f"\tEpoch {epoch_idx+1:d}/{args.num_epochs:d} done, LR {scheduler.get_last_lr()[0]:.2e} \
-    #         \n\tAvg train regression loss: {epoch_loss_reg_train/len(train_dataloader):.3f}, Avg train classification loss: {epoch_loss_cls_train/len(train_dataloader):.3f}")
     print(f"\tEpoch {epoch_idx+1:d}/{args.num_epochs:d} done, LR {scheduler.get_last_lr()[0]:.2e} \
-            \n\tAvg train regression loss: {epoch_loss_reg_train/len(train_dataloader):.3f}")
+            \n\tAvg train regression loss: {epoch_loss_reg_train/len(train_dataloader):.3f}, Avg train classification loss: {epoch_loss_cls_train/len(train_dataloader):.3f}")
     print(f"\tTrain classification accuracy: {num_correct:d}/{train_size:d}, {(acc_cls*100):.3f}%")
+
 
     # Test loop
     model.eval()
@@ -291,61 +305,52 @@ for epoch_idx, epoch in enumerate(range(args.num_epochs)):
         for batch_idx, data in enumerate(test_dataloader):
             spec, img = data[0].float().to(device), data[1].float().to(device)
             event_label, bbox = data[2].to(device), data[3].float().to(device)
-            # out_reg, out_cls = model([spec, img])
-            out_reg = model(img)
-            out_reg = torch.clamp(out_reg, 0, 255)
-            # out_reg, out_cls = out_all[:, :8], out_all[:, -5:]
+            if args.train_mode == "reg_and_cls":
+                out_reg, out_cls = model([spec, img])
+                out_reg = torch.clamp(out_reg, 0, 255)
+                loss_reg = criterion_reg(out_reg, bbox)
+                loss_cls = criterion_cls(out_cls, event_label)
+            elif args.train_mode == "only_reg":
+                out_reg = model(img)
+                out_reg = torch.clamp(out_reg, 0, 255)
+                loss_reg = criterion_reg(out_reg, bbox)
+                # loss_reg = iou_loss(out_reg, bbox).mean()
+            else: # "only_cls"
+                out_cls = model(img)
+                loss_cls = criterion_cls(out_cls, event_label)
+          
+            # accumulate iteration loss
+            if args.train_mode == "reg_and_cls" or args.train_mode == "only_reg":
+                epoch_loss_reg_test += loss_reg.item()
+            if args.train_mode == "reg_and_cls" or args.train_mode == "only_cls":
+                epoch_loss_cls_test += loss_cls.item()
+                _, predicted = torch.max(out_cls, 1)
+                num_correct += sum(predicted==event_label).item()
+                if epoch_idx==args.num_epochs-1:
+                    true_labels_list.append(event_label.clone().detach().cpu())
+                    predicted_labels_list.append(predicted.clone().detach().cpu())
 
-            # loss_reg = criterion_reg(out_reg, bbox)
-            loss_reg = iou_loss(out_reg, bbox).mean()
-            # loss_cls = criterion_cls(out_cls, event_label)
-            # loss = loss_reg + loss_cls
-            loss = loss_reg
-            epoch_loss_reg_test += loss_reg.item()
-            # epoch_loss_cls_test += loss_cls.item()
-            
-            # _, predicted = torch.max(out_cls, 1)
-            # num_correct += sum(predicted==event_label).item()
-            # if epoch_idx==args.num_epochs-1:
-            #     true_labels_list.append(event_label.clone().detach().cpu())
-            #     predicted_labels_list.append(predicted.clone().detach().cpu())
     test_loss_tally.append(epoch_loss_reg_test/len(test_dataloader))
     acc_cls = num_correct / test_size
     test_acc_tally.append(acc_cls)
-    # print(f"\tAvg test regression loss: {epoch_loss_reg_test/len(test_dataloader):.3f}, Avg test classification loss: {epoch_loss_cls_test/len(test_dataloader):.3f}")
-    print(f"\tAvg test regression loss: {epoch_loss_reg_test/len(test_dataloader):.3f}")
+    print(f"\tAvg test regression loss: {epoch_loss_reg_test/len(test_dataloader):.3f}, Avg test classification loss: {epoch_loss_cls_test/len(test_dataloader):.3f}")
     print(f"\tTest classification accuracy: {num_correct:d}/{test_size:d}, {(acc_cls*100):.3f}%")
 
 
 # confusion matrix
-# true_labels = torch.cat(true_labels_list, dim=0)
-# predicted_labels = torch.cat(predicted_labels_list, dim=0)
-# conf_matrix = confusion_matrix(true_labels.numpy(), predicted_labels.numpy(),)
-# class_names = ['Pothole', 'Manhole Cover', 'Drain Gate', 'Unknown', 'Speed Bump']  # Replace with your actual class names
-# class_dict = {i: class_name for i, class_name in enumerate(class_names)}
-# plt.figure(figsize=(8, 6))
-# sns.heatmap(conf_matrix, annot=True, fmt='d', cmap='Blues', cbar=False,
-#             xticklabels=[class_dict[i] for i in range(len(class_names))],
-#             yticklabels=[class_dict[i] for i in range(len(class_names))])
-# plt.xlabel('Predicted Labels')
-# plt.ylabel('True Labels')
-# plt.title('Confusion Matrix')
-# plt.savefig(os.path.join(exp_path, "conf_mat.png"))
-# plt.close()
-
-# plot losses
-np.save(os.path.join(exp_path, "train_loss.npy"), np.array(train_loss_tally))
-np.save(os.path.join(exp_path, "test_loss.npy"), np.array(test_loss_tally))
-np.save(os.path.join(exp_path, "train_acc.npy"), np.array(train_acc_tally))
-np.save(os.path.join(exp_path, "test_acc.npy"), np.array(test_acc_tally))
+plot_conf_matrix(exp_path, true_labels_list, predicted_labels_list)
+# plot losses and classfication accuracies
+save_loss_tallies(exp_path, train_loss_tally, test_loss_tally, train_acc_tally, test_acc_tally)
 plot_loss_curves(exp_path)
-
 # save model
 torch.save(model.state_dict(), os.path.join(exp_path, f"{args.num_epochs}_{args.learning_rate}.pth"))
+print("Model saved......")
 print("Train and test finished!")
+
+pdb.set_trace() 
 
 
 #%% TO-DOs:
 # image color normalization
-# IOU loss on bbox reconstruction and CE loss on event classification, produce MaP and Confusion Matrix
-pdb.set_trace() 
+# IOU loss for regression and focal loss for classification
+# add "only_regression", "only_classification" and "both" train modes

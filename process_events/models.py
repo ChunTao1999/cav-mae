@@ -4,6 +4,7 @@ import torch.nn.functional as nnF
 import torch.nn.init as init
 import torchvision
 
+# custon DNN, train_mode="reg_and_cls"
 class EventNN(nn.Module):
     def __init__(self):
         super(EventNN, self).__init__()
@@ -120,7 +121,9 @@ class EventResnet(nn.Module):
         return out[:, :8], out[:, -5:]
     
 
-# custom ResNet-18 model
+
+
+# custom ResNet-18 model, train_mode="only_reg" or "only_cls"
 class ModifiedResNet18(nn.Module):
     def __init__(self, num_classes=13):
         super(ModifiedResNet18, self).__init__()

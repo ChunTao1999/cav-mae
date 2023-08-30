@@ -13,6 +13,8 @@ import torch
 import torch.nn.functional as nnF
 from matplotlib.ticker import PercentFormatter
 from scipy.spatial import ConvexHull
+from sklearn.metrics import confusion_matrix
+import seaborn as sns
 import pdb # for debug
 
 
@@ -337,11 +339,40 @@ def plot_image(batch_imgs, gt_bboxes, gt_labels, pred_bboxes, pred_labels, label
     return
 
 
+def plot_conf_matrix(exp_path, true_labels_list, pred_labels_list):
+    if len(true_labels_list) == 0 or len(pred_labels_list) == 0:
+        print("Empty classification label lists, confusion matrix skipped......")
+    else:
+        true_labels = torch.cat(true_labels_list, dim=0)
+        predicted_labels = torch.cat(pred_labels_list, dim=0)
+        conf_matrix = confusion_matrix(true_labels.numpy(), predicted_labels.numpy(),)
+        class_names = ['Pothole', 'Manhole Cover', 'Drain Gate', 'Unknown', 'Speed Bump']  # Replace with your actual class names
+        class_dict = {i: class_name for i, class_name in enumerate(class_names)}
+        plt.figure(figsize=(8, 6))
+        sns.heatmap(conf_matrix, annot=True, fmt='d', cmap='Blues', cbar=False,
+                    xticklabels=[class_dict[i] for i in range(len(class_names))],
+                    yticklabels=[class_dict[i] for i in range(len(class_names))])
+        plt.xlabel('Predicted Labels')
+        plt.ylabel('True Labels')
+        plt.title('Confusion Matrix')
+        plt.savefig(os.path.join(exp_path, "conf_mat.png"))
+        plt.close()
+    return
+
+
+def save_loss_tallies(exp_path, train_loss_tally, test_loss_tally, train_acc_tally, test_acc_tally):
+    np.save(os.path.join(exp_path, "train_loss.npy"), np.array(train_loss_tally))
+    np.save(os.path.join(exp_path, "test_loss.npy"), np.array(test_loss_tally))
+    np.save(os.path.join(exp_path, "train_acc.npy"), np.array(train_acc_tally))
+    np.save(os.path.join(exp_path, "test_acc.npy"), np.array(test_acc_tally))
+    return
+
+
 def plot_loss_curves(exp_path):
     train_loss_tally = np.load(os.path.join(exp_path, "train_loss.npy"))
     test_loss_tally = np.load(os.path.join(exp_path, "test_loss.npy"))
-    # train_acc_tally = np.load(os.path.join(exp_path, "train_acc.npy"))
-    # test_acc_tally = np.load(os.path.join(exp_path, "test_acc.npy"))
+    train_acc_tally = np.load(os.path.join(exp_path, "train_acc.npy"))
+    test_acc_tally = np.load(os.path.join(exp_path, "test_acc.npy"))
     fig, ax1 = plt.subplots()
     ax1.plot(np.arange(len(train_loss_tally)), train_loss_tally, 'b-', linewidth=2.0, label='Train loss')
     ax1.plot(np.arange(len(test_loss_tally))*len(train_loss_tally)//len(test_loss_tally), test_loss_tally, 'r-', linewidth=2.0, label='Test loss')
@@ -349,16 +380,16 @@ def plot_loss_curves(exp_path):
     ax1.tick_params('y', color=(139/255, 69/255, 19/255))
     ax1.set_xlabel('Iteration', color=(139/255, 69/255, 19/255), fontsize=12)
     ax1.tick_params('x', color=(139/255, 69/255, 19/255))
-    # ax2 = ax1.twinx()
-    # ax2.plot(np.arange(len(train_acc_tally))*len(train_loss_tally)//len(test_loss_tally), train_acc_tally, 'b-', linewidth=2.0, label='Train acc')
-    # ax2.plot(np.arange(len(test_acc_tally))*len(train_loss_tally)//len(test_loss_tally), test_acc_tally, 'r-', linewidth=2.0, label='Test acc')
-    # ax2.set_ylabel('Accuracy', color=(139/255, 69/255, 19/255), fontsize=12)
-    # ax2.tick_params('y', color=(139/255, 69/255, 19/255))
-    # ax2.yaxis.set_major_formatter(PercentFormatter(xmax=1.0, decimals=0))
+    ax2 = ax1.twinx()
+    ax2.plot(np.arange(len(train_acc_tally))*len(train_loss_tally)//len(test_loss_tally), train_acc_tally, 'b-', linewidth=2.0, label='Train acc')
+    ax2.plot(np.arange(len(test_acc_tally))*len(train_loss_tally)//len(test_loss_tally), test_acc_tally, 'r-', linewidth=2.0, label='Test acc')
+    ax2.set_ylabel('Accuracy', color=(139/255, 69/255, 19/255), fontsize=12)
+    ax2.tick_params('y', color=(139/255, 69/255, 19/255))
+    ax2.yaxis.set_major_formatter(PercentFormatter(xmax=1.0, decimals=0))
     lines, labels = ax1.get_legend_handles_labels()
     ax1.legend(lines, labels, loc='upper right')
-    # lines2, labels2 = ax2.get_legend_handles_labels()
-    # ax2.legend(lines + lines2, labels + labels2, loc='upper right')
+    lines2, labels2 = ax2.get_legend_handles_labels()
+    ax2.legend(lines + lines2, labels + labels2, loc='upper right')
     plt.title('Loss and Accuracy', fontsize=14)
     plt.tight_layout()
     plt.savefig(os.path.join(exp_path, "loss_acc.png"))

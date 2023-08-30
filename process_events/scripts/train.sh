@@ -13,6 +13,7 @@ CAL_DATA_PATH=/home/nano01/a/tao88/RoadEvent-shared/CV/events_7.26
 DATASET_PATH=/home/nano01/a/tao88/RoadEvent-Dataset
 MODEL_SAVE_PATH=/home/nano01/a/tao88/cav-mae/process_events/train_results
 WHEELACCEL_TIME=1.024 # 512 samples 
+MODE=only_reg
 
 python3 train.py \
 -c ${CALIBRATE} \
@@ -28,4 +29,5 @@ python3 train.py \
 --dataset-path ${DATASET_PATH} \
 --download-csvs ${DOWNLOAD_CSV} \
 --wheelaccel-timespan ${WHEELACCEL_TIME} \
---model-save-path ${MODEL_SAVE_PATH}
+--model-save-path ${MODEL_SAVE_PATH} \
+--train-mode ${MODE}
