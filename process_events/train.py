@@ -220,7 +220,7 @@ class_weights = torch.tensor([0.2, 0.2, 0.2, 0.2, 0.2])
 class_weights = class_weights.to(device)
 criterion_cls = nn.CrossEntropyLoss(weight=class_weights)
 optimizer = optim.Adam(model.parameters(), lr=args.learning_rate, betas=args.betas, eps=args.eps, weight_decay=args.weight_decay, amsgrad=False)
-scheduler = ExponentialLR(optimizer, gamma=1) # pick gamma less than 1
+scheduler = ExponentialLR(optimizer, gamma=0.9) # pick gamma less than 1
 print("\nStart Event Detection and Classification Training......\n")
 exp_name = f"EventResnet_{args.num_epochs}_{args.learning_rate}_{args.train_mode}"
 exp_path = os.path.join(args.model_save_path, exp_name)
