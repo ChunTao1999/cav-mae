@@ -52,6 +52,7 @@ parser.add_argument('--learning-rate', type=float, default=1e-3, required=False,
 parser.add_argument('--betas', type=tuple, default=(0.9, 0.999), required=False, help='adam betas')
 parser.add_argument('--eps', type=float, default=1e-8, required=False, help='adam eps')
 parser.add_argument('--weight-decay', type=float, default=1e-3, required=False, help='adam weight decay')
+parser.add_argument('--exp-scheduler-gamma', type=float, default=0.9, required=False, help='gamma value for exponential scheduler')
 parser.add_argument('--model-save-path', type=str, default='', required=True, help='path to save the trained model parameters')
 parser.add_argument('--train-mode', type=str, choices=['only_reg', 'only_cls', 'reg_and_cls'], default='reg_and_cls', required=False, help='define which tasks to perform in training')
 args = parser.parse_args()
@@ -298,6 +299,7 @@ for epoch_idx, epoch in enumerate(range(args.num_epochs)):
     model.eval()
     epoch_loss_reg_test = 0.0
     epoch_loss_cls_test = 0.0
+    epoch_loss = 0.0
     num_correct = 0
     true_labels_list = []
     predicted_labels_list = []
@@ -322,15 +324,17 @@ for epoch_idx, epoch in enumerate(range(args.num_epochs)):
             # accumulate iteration loss
             if args.train_mode == "reg_and_cls" or args.train_mode == "only_reg":
                 epoch_loss_reg_test += loss_reg.item()
+                epoch_loss += loss_reg.item()
             if args.train_mode == "reg_and_cls" or args.train_mode == "only_cls":
                 epoch_loss_cls_test += loss_cls.item()
+                epoch_loss += loss_cls.item()
                 _, predicted = torch.max(out_cls, 1)
                 num_correct += sum(predicted==event_label).item()
                 if epoch_idx==args.num_epochs-1:
                     true_labels_list.append(event_label.clone().detach().cpu())
                     predicted_labels_list.append(predicted.clone().detach().cpu())
 
-    test_loss_tally.append(epoch_loss_reg_test/len(test_dataloader))
+    test_loss_tally.append(epoch_loss/len(test_dataloader))
     acc_cls = num_correct / test_size
     test_acc_tally.append(acc_cls)
     print(f"\tAvg test regression loss: {epoch_loss_reg_test/len(test_dataloader):.3f}, Avg test classification loss: {epoch_loss_cls_test/len(test_dataloader):.3f}")

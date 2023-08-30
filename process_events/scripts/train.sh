@@ -6,6 +6,7 @@ SEED=2
 NUM_EPOCHS=20
 RESUME=1
 LR=0.001
+GAMMA=0.9
 DATASET_JSONFILE_PATH=/home/nano01/a/tao88/RoadEvent-Dataset/datafiles/events_metafile.json
 EVENTTYPE_JSON_PATH=/home/nano01/a/tao88/RoadEvent-Dataset/datafiles/event_types.json
 DATA_PATH=/home/nano01/a/tao88/RoadEvent-shared/CV/events_8.18
@@ -29,5 +30,6 @@ python3 train.py \
 --dataset-path ${DATASET_PATH} \
 --download-csvs ${DOWNLOAD_CSV} \
 --wheelaccel-timespan ${WHEELACCEL_TIME} \
+--exp-scheduler-gamma ${GAMMA} \
 --model-save-path ${MODEL_SAVE_PATH} \
 --train-mode ${MODE}
