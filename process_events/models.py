@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as nnF
 import torch.nn.init as init
 import torchvision
+import pdb
 
 # custon DNN, train_mode="reg_and_cls"
 class EventNN(nn.Module):
@@ -138,3 +139,34 @@ class ModifiedResNet18(nn.Module):
         x = x.view(x.size(0), -1)
         x = self.fc(x)
         return x
+    
+
+# pretrained resnet18 (vision) plus VGGish (motion), train_mode="reg_and_cls"
+class ResNet18plusVGGish(nn.Module):
+    def __init__(self, num_classes=13):
+        super(ResNet18plusVGGish, self).__init__()
+        pretrained_resnet = torchvision.models.resnet18(pretrained=True)
+        self.features_v = nn.Sequential(*list(pretrained_resnet.children())[:-1])
+        pretrained_vggish = torch.hub.load('harritaylor/torchvggish', 'vggish')
+        self.features_m = nn.Sequential(*list(pretrained_vggish.features.children()))
+        # self.features
+        self.fc_seqn = nn.Sequential(nn.Linear(1024, 128),
+                                     nn.ReLU(inplace=True),
+                                     # nn.Dropout(p=0.3),
+                                     nn.Linear(128, num_classes),
+                                     nn.ReLU(inplace=True),
+                                     # nn.Dropout(p=0.3)
+                                    )
+    
+    def forward(self, x): # x[0] is spec (1, 17, 31), x[1] is frame (3, 256, 256)
+        feat_v = self.features_v(x[1])
+        feat_v = feat_v.view(-1, 512)
+
+        feat_m = self.features_m(x[0])
+        feat_m = feat_m.view(-1, 512)
+
+        # concat
+        feat_a = torch.cat((feat_m, feat_v), dim=-1)
+        out = self.fc_seqn(feat_a)
+
+        return out[:, :8], out[:, -5:]

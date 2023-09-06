@@ -2,21 +2,21 @@ CALIBRATE=1
 PERSPECTIVE=1
 DOWNLOAD_CSV=1
 PREPROCESS=1
-SEED=2
+SEED=4
 NUM_EPOCHS=20
 RESUME=1
 LR=0.001
-GAMMA=0.9
-DATASET_JSONFILE_PATH=/home/nano01/a/tao88/RoadEvent-Dataset/datafiles/events_metafile_8.31.json # change this for a new data folder
+GAMMA=0.95
+DATASET_JSONFILE_PATH=/home/nano01/a/tao88/RoadEvent-Dataset/datafiles/events_metafile.json # change this for a new data folder
 EVENTTYPE_JSON_PATH=/home/nano01/a/tao88/RoadEvent-Dataset/datafiles/event_types.json # keep this for preprocessing
 DATA_PATH=/home/nano01/a/tao88/RoadEvent-shared/CV/events_8.31
 CAL_DATA_PATH=/home/nano01/a/tao88/RoadEvent-shared/CV/events_7.26
 DATASET_PATH=/home/nano01/a/tao88/RoadEvent-Dataset
 MODEL_SAVE_PATH=/home/nano01/a/tao88/cav-mae/process_events/train_results
 WHEELACCEL_TIME=1.024 # 512 samples 
-MODE=only_cls
+MODE=reg_and_cls
 
-python3 train.py \
+python3 train_vggish.py \
 -c ${CALIBRATE} \
 -p ${PERSPECTIVE} \
 -j ${DATASET_JSONFILE_PATH} \

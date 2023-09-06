@@ -16,14 +16,14 @@ import torchvision
 import torch.nn as nn
 import torch.nn.functional
 import torch.optim as optim
-from torch.optim.lr_scheduler import ExponentialLR
+from torch.optim.lr_scheduler import ExponentialLR, StepLR
 from torch.utils.data import Dataset, DataLoader, random_split
 import torchvision.transforms as T
 from dataloader_events import RoadEventDataset
 from preprocess_data import preprocess
 from utils import calibrate_camera, define_perspective_transform, plot_image, plot_conf_matrix, save_loss_tallies, plot_loss_curves
 from utils import polygon_area, compute_intersection_area, compute_union_area
-from models import EventNN, ModifiedResNet18
+from models import EventNN, ModifiedResNet18, ResNet18plusVGGish
 from torchsummary import summary
 from sklearn.metrics import confusion_matrix
 import seaborn as sns
@@ -72,7 +72,7 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
 #%% Preprocesses
-# If needed, calibrate the camera and save camera matrices
+# if needed, calibrate the camera and save camera matrices
 if not os.path.exists(os.path.join(args.data_path, "results")):
     os.makedirs(os.path.join(args.data_path, "results"))
 if args.calibrate==0:
@@ -202,28 +202,32 @@ else: # "only_cls"
     num_classes = 5
 
 # Create model
-# model = EventNN()
-# model.apply(initialize_weights)
-# model = torchvision.models.resnet18(pretrained=True)
-# model.fc = torch.nn.Linear(in_features=512, out_features=num_classes)
-pretrained_dict = torchvision.models.resnet18(pretrained=True).state_dict()
-model = ModifiedResNet18(num_classes=num_classes)
-model_dict = model.features.state_dict()
-pretrained_dict = {k: v for k, v in pretrained_dict.items() if k in model_dict}
-model_dict.update(pretrained_dict)
-model.features.load_state_dict(model_dict)
-model.fc.apply(initialize_weights)
+# pretrained_dict = torchvision.models.resnet18(pretrained=True).state_dict()
+# model_v = ModifiedResNet18(num_classes=num_classes)
+# model_dict = model_v.features.state_dict()
+# pretrained_dict = {k: v for k, v in pretrained_dict.items() if k in model_dict}
+# model_dict.update(pretrained_dict)
+# model_v.features.load_state_dict(model_dict)
+# model_v.fc.apply(initialize_weights)
+# model = model.to(device)
+# print(model)
+
+# model_vggish = torch.hub.load('harritaylor/torchvggish', 'vggish')
+# print(model_vggish)
+model = ResNet18plusVGGish(num_classes=num_classes)
+model.fc_seqn.apply(initialize_weights)
 model = model.to(device)
-print(model)
+# pdb.set_trace()
 
 criterion_reg = nn.MSELoss() # switch to IOU loss later
-class_weights = torch.tensor([0.2, 0.2, 0.2, 0.2, 0.2])
+class_weights = torch.tensor([0.21, 0.21, 0.21, 0.16, 0.21])
 class_weights = class_weights.to(device)
 criterion_cls = nn.CrossEntropyLoss(weight=class_weights)
 optimizer = optim.Adam(model.parameters(), lr=args.learning_rate, betas=args.betas, eps=args.eps, weight_decay=args.weight_decay, amsgrad=False)
-scheduler = ExponentialLR(optimizer, gamma=0.9) # pick gamma less than 1
+scheduler = ExponentialLR(optimizer, gamma=args.exp_scheduler_gamma) # pick gamma less than 1
+# scheduler = StepLR(optimizer, step_size=10, gamma=0.5)
 print("\nStart Event Detection and Classification Training......\n")
-exp_name = f"EventResnet_{args.num_epochs}_{args.learning_rate}_{args.train_mode}"
+exp_name = f"ResNet18plusVGGish_SEED={args.seed}_{args.num_epochs}_{args.learning_rate}_{args.train_mode}"
 exp_path = os.path.join(args.model_save_path, exp_name)
 if not os.path.exists(exp_path): os.makedirs(exp_path)
 # if args.resume_from_checkpoint==0:
@@ -238,6 +242,7 @@ for epoch_idx, epoch in enumerate(range(args.num_epochs)):
     
     # Train loop
     model.train()
+    # model_vggish.train()
     epoch_loss_reg_train = 0.0
     epoch_loss_cls_train = 0.0
     num_correct = 0
@@ -285,7 +290,7 @@ for epoch_idx, epoch in enumerate(range(args.num_epochs)):
             print(f"\t{batch_idx+1}/{len(train_dataloader)}")
         if args.train_mode == "reg_and_cls":
             if (batch_idx+1) == 20:
-                plot_image(img[:4], bbox[:4], event_label[:4], out_reg[:4], out_cls[:4], eventType_dict, os.path.join(exp_path, f"epoch_{epoch_idx+1}.png"))
+                plot_image(img[:4], bbox[:4], event_label[:4], out_reg[:4], predicted[:4], eventType_dict, os.path.join(exp_path, f"epoch_{epoch_idx+1}.png"))
    
     scheduler.step()
     acc_cls = num_correct / train_size
