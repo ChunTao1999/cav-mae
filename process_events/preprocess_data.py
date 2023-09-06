@@ -1,4 +1,5 @@
 import cv2
+import bisect
 import json
 import numpy as np
 import glob
@@ -336,6 +337,8 @@ def preprocess_internal(session_list,
             else:
                 wheel_number = 34
             road_event_dict[event_id]['wheel'] = str(wheel_number)
+            speed_at_event = veh_speed.iloc[bisect.bisect_right(veh_speed.iloc[:,0], event_timestamp), 1]
+            road_event_dict[event_id]['speed'] = float(format(speed_at_event, '.3f'))
 
             # # crop the wheelAccel data into segments around event timestamps
             # if event_left and not event_right:
@@ -376,6 +379,7 @@ def preprocess_internal(session_list,
 
             # 2. Process one/all of the frames relevant to the current event
             road_event_dict[event_id]['frames'] = []
+            road_event_dict[event_id]['rectangle_boxcenter'] = []
             road_event_dict[event_id]['polygon_box'] = []
             for frame_idx, [frame_timestamp, frame_dist] in enumerate(values): # for each frame
                 frame_name = f'session_{session_id:d}_event_{(event_timestamp+session_timeShift):.3f}_frame_{frame_idx:d}_at_time_{frame_timestamp:.3f}_dist_{frame_dist:.3f}.png'
@@ -410,6 +414,7 @@ def preprocess_internal(session_list,
                                                 accum_boxcenter=accum_boxcenter)
                 frame_bev = add_bbox_to_frame(image=frame_bev,
                                               pts_inv=pts_bev)
+                road_event_dict[event_id]['rectangle_boxcenter'].append(boox_coords_to_bbox_label(accum_boxcenter[-1]))
                 road_event_dict[event_id]['polygon_box'].append(boox_coords_to_bbox_label(pts_inv))
                 if plot_processedFrames:
                     cv2.imwrite(os.path.join(save_path ,"undistorted_rv_annotated", frame_id+".png"), frame_rv) 
@@ -420,7 +425,9 @@ def preprocess_internal(session_list,
                                                                                                frame_timestamp-session_timeShift,
                                                                                                frame_dist))
         print(f'Session {session_id} processed......')
-    
+        # with open(json_save_path, 'w') as outfile:
+        #     json.dump(road_event_dict, outfile)
+        # pdb.set_trace()
     # 3. Write event data path into to the event dataset dictionary and save to the jsonfile path
     with open(json_save_path, 'w') as outfile:
         json.dump(road_event_dict, outfile)
