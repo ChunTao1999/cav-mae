@@ -2,12 +2,12 @@ CALIBRATE=1
 PERSPECTIVE=1
 DOWNLOAD_CSV=1
 PREPROCESS=0
-DATASET_JSONFILE_PATH=/home/nano01/a/tao88/RoadEvent-Dataset-Internal/9.5/datafiles/events_metafile.json # change this for a new data folder
-EVENTTYPE_JSON_PATH=/home/nano01/a/tao88/RoadEvent-Dataset-Internal/9.5/datafiles/event_types.json # keep this for preprocessing
+DATASET_JSONFILE_PATH=/home/nano01/a/tao88/RoadEvent-Dataset-Internal/datafiles/events_metafile_with_labels.json # change this for a new data folder
+EVENTTYPE_JSON_PATH=/home/nano01/a/tao88/RoadEvent-Dataset-Internal/datafiles/event_types.json # keep this for preprocessing
 DATA_PATH=/home/nano01/a/tao88/RoadEvent-shared/CV
 CAL_DATA_PATH=/home/nano01/a/tao88/RoadEvent-shared/CV/events_7.26
-DATASET_PATH=/home/nano01/a/tao88/RoadEvent-Dataset-Internal/9.5
-WHEELACCEL_TIME=1.024 # 512 samples left and right, 1024 samples in total
+DATASET_PATH=/home/nano01/a/tao88/RoadEvent-Dataset-Internal
+WHEELACCEL_TIME=1.024 # 256 samples left and right, 512 samples in total (for 500Hz sensor data)
 
 python3 preprocess_data_internal.py \
 -c ${CALIBRATE} \

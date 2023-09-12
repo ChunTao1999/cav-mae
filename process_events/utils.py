@@ -12,6 +12,7 @@ import subprocess
 import torch
 import torch.nn.functional as nnF
 from matplotlib.ticker import PercentFormatter
+from scipy.signal import find_peaks
 from scipy.spatial import ConvexHull
 from sklearn.metrics import confusion_matrix
 import seaborn as sns
@@ -281,6 +282,33 @@ def boox_coords_to_bbox_label(pts_inv):
 def normalize_wheel_accel(wheelAccel_seg, v_peak, v_nom):
     wheelAccel_seg /= np.square(v_peak/v_nom)
     return wheelAccel_seg
+
+
+# 9.10
+def settling_time_and_dist(wheelAccel_seg, veh_speed, event_timestamp, timespan, SSV, threshold): # SSV stands for "Steady-State Value"
+    """Compute settling time and distance of the wheelAccel segment, based on a percentage of peak to peak amplitude"""
+    wheelAccel_seg = wheelAccel_seg[0]
+    if wheelAccel_seg.shape[0] == 0:
+        return 0, 0, 0
+    amp_pp = np.max(wheelAccel_seg) - np.min(wheelAccel_seg)# peak to peak amplitude
+    tol_threshold = threshold * amp_pp
+    # use SSV +- tol_threshold as the check condition for the signal amplitude at any instant
+    midpoint = wheelAccel_seg.shape[0] // 2
+    start = midpoint
+    for idx, sig_val in enumerate(wheelAccel_seg[midpoint:]):
+        if sig_val > (SSV+tol_threshold) or sig_val < (SSV-tol_threshold):
+            start = idx + midpoint
+    settling_time = (start-midpoint) * 0.002
+    # use extracted veh_speed segment to compute settling_dist
+    speed_vec = veh_speed.iloc[bisect.bisect_left(veh_speed.iloc[:,0], event_timestamp):bisect.bisect_right(veh_speed.iloc[:,0], event_timestamp+settling_time), 1]
+    settling_dist = 0.01 * np.sum(speed_vec)
+    peaks_pos, _ = find_peaks(wheelAccel_seg[midpoint:], prominence=1)
+    peaks_neg, _ = find_peaks(-wheelAccel_seg[midpoint:], prominence=1)
+    try:
+        p2p_time = np.abs(peaks_pos[0]-peaks_neg[0]) * 0.002
+    except:
+        p2p_time = 0
+    return settling_time, settling_dist, p2p_time
 
 
 def plot_image(batch_imgs, gt_bboxes, gt_labels, pred_bboxes, pred_labels, label_dict, save_path):

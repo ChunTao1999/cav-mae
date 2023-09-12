@@ -7,7 +7,8 @@ import pandas as pd
 import os
 import subprocess
 import matplotlib.pyplot as plt
-from utils import compute_event_loc_dist_curves, compute_event_loc_dist_curves_2, add_bbox_to_frame, add_accum_boxcenter, boox_coords_to_bbox_label, normalize_wheel_accel
+from utils import compute_event_loc_dist_curves, compute_event_loc_dist_curves_2, add_bbox_to_frame, add_accum_boxcenter, boox_coords_to_bbox_label
+from utils import normalize_wheel_accel, settling_time_and_dist
 import pdb # for debug
 
 
@@ -282,11 +283,14 @@ def preprocess_internal(session_list,
         print(subprocess.run(["chmod", "+x", "/home/nano01/a/tao88/cav-mae/process_events/scripts/downloadEventList.sh"]))
         subprocess.call("/home/nano01/a/tao88/cav-mae/process_events/scripts/downloadEventList.sh {}".format(session_list), shell=True)
     # initiate road event data dict
+    # road_event_dict = json.load(open("/home/nano01/a/tao88/RoadEvent-Dataset-Internal/datafiles/events_metafile.json"))
     road_event_dict = {}
     # get dataFolder_list from session_list and date_list
     dataFolder_list = []
     for idx, session_id in enumerate(session_list):
         dataFolder_list.append(f"events_{date_list[idx]}/session_{session_id}")
+    event_count = 0
+    frame_count = 0
 
     # get the vehicle's rear WheelAccel and speed sensor data, and event timestamps from session csv data for all sessions
     for sessionFolderName in dataFolder_list: # for each recorded drive session
@@ -337,28 +341,42 @@ def preprocess_internal(session_list,
             else:
                 wheel_number = 34
             road_event_dict[event_id]['wheel'] = str(wheel_number)
-            speed_at_event = veh_speed.iloc[bisect.bisect_right(veh_speed.iloc[:,0], event_timestamp), 1]
+            speed_at_event = veh_speed.iloc[bisect.bisect_left(veh_speed.iloc[:,0], event_timestamp), 1]
             road_event_dict[event_id]['speed'] = float(format(speed_at_event, '.3f'))
 
-            # # crop the wheelAccel data into segments around event timestamps
-            # if event_left and not event_right:
-            #     wheelAccel_seg = np.float32(sessionData_500['rlWheelAccel'][event_start_idx:event_end_idx]) # (512,)
-            # elif event_right and not event_left:
-            #     wheelAccel_seg = np.float32(sessionData_500['rrWheelAccel'][event_start_idx:event_end_idx])
-            # else: # the event is detected on both wheels
-            #     # concat both wheels' wheelAccels
-            #     wheelAccel_left_seg = np.float32(sessionData_500['rlWheelAccel'][event_start_idx:event_end_idx])
-            #     wheelAccel_left_seg = np.expand_dims(wheelAccel_left_seg, axis=0) # (1, 512)
-            #     wheelAccel_right_seg = np.float32(sessionData_500['rrWheelAccel'][event_start_idx:event_end_idx])
-            #     wheelAccel_right_seg = np.expand_dims(wheelAccel_right_seg, axis=0) # (1, 512)
-            #     wheelAccel_seg = np.float32(np.concatenate([wheelAccel_left_seg, wheelAccel_right_seg], axis=0)) # (2, 512)
-            # # normalize the wheelAccel_seg based on peak speed and nominal speed
-            # wheelAccel_seg = normalize_wheel_accel(wheelAccel_seg=wheelAccel_seg,
-            #                                        v_peak=np.max(sessionData_100['speed'][event_start_idx_100:event_end_idx_100]),
-            #                                        v_nom=wheelAccel_conf['nominal_speed'])
-            # # save the wheelAccel segments
-            # with open(os.path.join(wheelAccel_save_path, 'wheelAccel_session_{:d}_event_{:.3f}.npy'.format(session_id, event_timestamp)), 'wb') as f:
-            #     np.save(f, wheelAccel_seg)
+            # crop the wheelAccel data into segments around event timestamps
+            if event_left and not event_right:
+                wheelAccel_seg = np.float32(sessionData_500['rlWheelAccel'][event_start_idx:event_end_idx]) # (512,), 1.024s segment when Fs=500Hz
+                wheelAccel_seg = np.expand_dims(wheelAccel_seg, axis=0) # (1, 512)
+            elif event_right and not event_left:
+                wheelAccel_seg = np.float32(sessionData_500['rrWheelAccel'][event_start_idx:event_end_idx])
+                wheelAccel_seg = np.expand_dims(wheelAccel_seg, axis=0) # (1, 512)
+            else: # the event is detected on both wheels
+                # concat both wheels' wheelAccels
+                wheelAccel_left_seg = np.float32(sessionData_500['rlWheelAccel'][event_start_idx:event_end_idx])
+                wheelAccel_left_seg = np.expand_dims(wheelAccel_left_seg, axis=0) # (1, 512)
+                wheelAccel_right_seg = np.float32(sessionData_500['rrWheelAccel'][event_start_idx:event_end_idx])
+                wheelAccel_right_seg = np.expand_dims(wheelAccel_right_seg, axis=0) # (1, 512)
+                wheelAccel_seg = np.float32(np.concatenate([wheelAccel_left_seg, wheelAccel_right_seg], axis=0)) # (2, 512)
+            # normalize the wheelAccel_seg based on peak speed and nominal speed
+            wheelAccel_seg = normalize_wheel_accel(wheelAccel_seg=wheelAccel_seg,
+                                                   v_peak=np.max(sessionData_100['speed'][event_start_idx_100:event_end_idx_100]),
+                                                   v_nom=wheelAccel_conf['nominal_speed'])
+            # 9.10: investigate the wheelAccel segment to extract event characteristics and write to road_event_dict
+            settling_time, settling_dist, p2p_time = settling_time_and_dist(wheelAccel_seg=wheelAccel_seg,
+                                                                            veh_speed=veh_speed,
+                                                                            event_timestamp=event_timestamp,
+                                                                            timespan=wheelAccel_conf['timespan'],
+                                                                            SSV=0,
+                                                                            threshold=0.2)
+            road_event_dict[event_id]['settling_time'] = settling_time
+            road_event_dict[event_id]['settling_dist'] = settling_dist
+            road_event_dict[event_id]['p2p_time'] = p2p_time
+            # save the wheelAccel segments
+            with open(os.path.join(save_path, "wheelAccel_seg", event_id+".npy"), 'wb') as f:
+                np.save(f, wheelAccel_seg)
+
+
             # road_event_dict[event_id]['wheelAccel_path'] = os.path.join(wheelAccel_save_path, f'wheelAccel_session_{session_id:d}_event_{event_timestamp:.3f}.npy')
             # # process the wheelAccel segs to transform into spectrograms
             # plt.figure()
@@ -424,12 +442,14 @@ def preprocess_internal(session_list,
                                                                                                frame_idx, 
                                                                                                frame_timestamp-session_timeShift,
                                                                                                frame_dist))
-        print(f'Session {session_id} processed......')
+                frame_count += 1
+            event_count += 1        
+        print(f'{sessionFolderName} processed......')
         # with open(json_save_path, 'w') as outfile:
         #     json.dump(road_event_dict, outfile)
         # pdb.set_trace()
     # 3. Write event data path into to the event dataset dictionary and save to the jsonfile path
     with open(json_save_path, 'w') as outfile:
         json.dump(road_event_dict, outfile)
-    print('All processed frames and wheelAccels saved!')
+    print(f'All processed frames and wheelAccels saved! Event count: {event_count:d}; Frame count: {frame_count:d}')
     return 
