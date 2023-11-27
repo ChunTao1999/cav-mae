@@ -8,9 +8,10 @@ from natsort import natsorted
 import numpy as np
 import json
 import shutil
+from tkinter.simpledialog import askfloat
 import pdb # for debug
 
-
+#%% BoundingBoxApp v1
 class BoundingBoxApp:
     def __init__(self, root, data_path, event_type_path, prev_path, save_path, image_frame_size, frames_per_event):
         self.root = root
@@ -267,36 +268,293 @@ class BoundingBoxApp:
     def quit_and_save(self):
         self.save_label_data()
         self.root.destroy()
+
+
+# def main():
+#     # Arguments
+#     parser = argparse.ArgumentParser()
+#     parser.add_argument('-d', '--data-folder-path', type=str, default='', required=True, help='data folder path')
+#     parser.add_argument('-p', '--prev-json-path', type=str, default='', required=True, help='path to previously saved meta json file')
+#     parser.add_argument('-e', '--event-type-path', type=str, default='', required=True, help='path to event label to event type convertion')
+#     parser.add_argument('-s', '--json-save-path', type=str, default='', required=True, help='path to save the manually-labled meta json file')
+#     parser.add_argument('-f', '--frame-size', type=int, nargs='+', required=True, help='the frame size of image to edit')
+#     parser.add_argument('-n', '--frames-per-event', type=int, default=3, required=True, help='number of frames per event in the current folder')
+#     args = parser.parse_args()
+#     # args.json_save_path = os.path.join('/'.join(args.prev_json_path.split('/')[:-1]), f"events_metafile_manually_labeled_{args.data_folder_path.split('/')[-1].split('_')[-1]}.json")
+
+#     root = tk.Tk()
+#     app = BoundingBoxApp(root, 
+#                          data_path=args.data_folder_path,
+#                          event_type_path=args.event_type_path,
+#                          prev_path=args.prev_json_path,
+#                          save_path=args.json_save_path,
+#                          image_frame_size=args.frame_size,
+#                          frames_per_event=args.frames_per_event)
+#     root.mainloop()
     
 
-def main():
-    # Arguments
-    parser = argparse.ArgumentParser()
-    parser.add_argument('-d', '--data-folder-path', type=str, default='', required=True, help='data folder path')
-    parser.add_argument('-p', '--prev-json-path', type=str, default='', required=True, help='path to previously saved meta json file')
-    parser.add_argument('-e', '--event-type-path', type=str, default='', required=True, help='path to event label to event type convertion')
-    parser.add_argument('-s', '--json-save-path', type=str, default='', required=True, help='path to save the manually-labled meta json file')
-    parser.add_argument('-f', '--frame-size', type=int, nargs='+', required=True, help='the frame size of image to edit')
-    parser.add_argument('-n', '--frames-per-event', type=int, default=3, required=True, help='number of frames per event in the current folder')
-    args = parser.parse_args()
-    # args.json_save_path = os.path.join('/'.join(args.prev_json_path.split('/')[:-1]), f"events_metafile_manually_labeled_{args.data_folder_path.split('/')[-1].split('_')[-1]}.json")
-
-    root = tk.Tk()
-    app = BoundingBoxApp(root, 
-                         data_path=args.data_folder_path,
-                         event_type_path=args.event_type_path,
-                         prev_path=args.prev_json_path,
-                         save_path=args.json_save_path,
-                         image_frame_size=args.frame_size,
-                         frames_per_event=args.frames_per_event)
-    root.mainloop()
-    
-
-if __name__ == "__main__":
-    main()
+# if __name__ == "__main__":
+#     main()
 
 # TO-DOs:
     # copy the original meta json file and make changes to the copy
     # print event label to event type convertion in text label in tkinter
     # print the current event_id and frame_id in tkinter
     # add functionality to visualize the manually labeled bbox in a new folder under data path
+
+
+#%% BoundingBoxApp v2
+class BoundingBoxAppv2:
+    def __init__(self, root, image_path, wheelAccel_path, prev_json_path, save_json_path, event_type_path, frame_size):
+        self.root = root
+        self.image_path = image_path
+        self.wheelAccel_path = wheelAccel_path
+        self.prev_json_path = prev_json_path
+        self.save_json_path = save_json_path
+        with open(event_type_path, 'r') as in_file:
+            self.event_type_dict = json.load(in_file)
+        self.prepare_json()
+        try:
+            self.event_idx, self.frame_idx = int(self.prev_json_path.split('_')[-2]), \
+                                             int(self.prev_json_path.split('_')[-1].split('.')[0])
+        except:
+            self.event_idx = 0
+            self.frame_idx = 0
+        self.fs = frame_size
+        self.rect = None
+        self.oval = None
+        self.setup_ui()
+
+
+    def prepare_json(self):
+        shutil.copy(self.prev_json_path, self.save_json_path)
+        with open(self.save_json_path, 'r') as in_file:
+            self.event_dict = json.load(in_file)
+        self.event_list = list(self.event_dict.keys())
+
+
+    def setup_ui(self):
+        # root and configs
+        self.root.title("Road Event Dataset Labeling Tool v2.0")
+        self.root.geometry("1280x720")
+        self.root.columnconfigure(0, weight=1)
+        self.root.columnconfigure(1, weight=4)
+        self.root.rowconfigure(0, weight=1)
+        self.root.rowconfigure(1, weight=2)
+        self.root.rowconfigure(2, weight=3)
+        intro_font = ("Helvetica", 10, "bold")
+        label_font = ("Helvetica", 14, "bold")
+
+        # bind keys
+        self.root.protocol("WM_DELETE_WINDOW", self.quit_and_save)
+        self.root.bind("n", self.next_image)
+        self.root.bind("p", self.prev_image)
+        self.root.bind("d", self.add_difficult_label)
+
+        # frames
+        frm_left_0 = tk.Frame(self.root, relief=tk.RAISED, bd=2, bg="white")
+        frm_left_0.grid(row=0, column=0, sticky='WENS') 
+        frm_left_1 = tk.Frame(self.root, relief=tk.RAISED, bd=2, bg="white")
+        frm_left_1.grid(row=1, column=0, sticky="WENS")
+        frm_left_2 = tk.Frame(self.root, relief=tk.RAISED, bd=2, bg="white")
+        frm_left_2.grid(row=2, column=0, sticky="WENS")
+
+        
+        frm_right = tk.Frame(self.root, relief=tk.RAISED, bd=2, bg="white")
+        frm_right.grid(row=0, column=1, rowspan=3,sticky='WENS')
+
+        # widgets
+        l_intro = tk.Label(frm_left_0,
+                           text="An UI tool to drag and reposition the bounding box and to provide an event type",
+                           font=intro_font,
+                           wraplength=150)
+        l_intro.place(x=0, y=0)
+        self.l_progress = tk.Label(frm_left_1,
+                                   text=self.event_dict[self.event_list[self.event_idx]]['frames'][self.frame_idx]+'\n\n'+f"Event {self.event_idx}/{len(self.event_dict)}",
+                                   font=label_font,
+                                   wraplength=150)
+        self.l_progress.place(x=0, y=0)
+        self.next_button = tk.Button(frm_left_1, 
+                                     text="Next",
+                                     font=label_font)
+        self.next_button.place(x=0, y=120)
+        self.prev_button = tk.Button(frm_left_1,
+                                     text="Prev",
+                                     font=label_font)
+        self.prev_button.place(x=80, y=120)
+        # button to indicate difficult sample
+        self.diff_button = tk.Button(frm_left_2,
+                                     text="Difficult",
+                                     font=label_font)
+        self.diff_button.place(x=0, y=0)
+        self.event_dict[self.event_list[self.event_idx]]['difficult'][self.frame_idx] == 0
+        fg = "green"
+        self.l_diff = tk.Label(frm_left_2,
+                               text=f"Current frame has difficult label {self.event_dict[self.event_list[self.event_idx]]['difficult'][self.frame_idx]}",
+                               font=intro_font,
+                               wraplength=150,
+                               fg=fg)
+        self.l_diff.place(x=0, y=80)
+               
+
+        # canvas
+        self.canvas = tk.Canvas(frm_right, cursor="cross")
+        self.canvas.pack(fill=tk.BOTH, expand=True)
+        demo_pic = Image.open(os.path.join(self.image_path, self.event_dict[self.event_list[self.event_idx]]['frames'][self.frame_idx]+'.png'))
+        demo_pic_resized = demo_pic.resize((self.fs[0], self.fs[1]), Image.Resampling.LANCZOS)
+        self.demo_img = ImageTk.PhotoImage(demo_pic_resized)
+        self.canvas.create_image(0, 0, anchor=tk.NW, image=self.demo_img)
+
+        # extract rv_rot_rect_box coordinates
+        self.bbox_coords = np.array(self.event_dict[self.event_list[self.event_idx]]["rv_rot_rect_box"][self.frame_idx])
+        self.bbox_coords *= ([self.fs[0]/1920, self.fs[1]/1080])
+        self.bbox_coords = np.float_(self.bbox_coords) # br, tr, tl, bl
+        self.center_coords = np.array(self.event_dict[self.event_list[self.event_idx]]["rv_rot_rect_box_dim"][self.frame_idx][:2])
+        self.center_coords *= ([self.fs[0]/1920, self.fs[1]/1080])
+        self.draw_rectangle()
+
+        # more bind keys
+        self.next_button.bind("<Button-1>", self.next_image)
+        self.prev_button.bind("<Button-1>", self.prev_image)
+        self.diff_button.bind("<Button-1>", self.add_difficult_label)
+        self.canvas.bind("<Button-1>", self.on_click)
+        # self.canvas.bind("<B1-Motion>", self.on_drag)
+        # self.root.bind("<s>", self.scale_rectangle)
+
+
+    def draw_rectangle(self):
+        if self.rect:
+            self.canvas.delete(self.rect)
+        if self.oval:
+            self.canvas.delete(self.oval)
+        self.rect = self.canvas.create_polygon(*self.bbox_coords.flatten(), outline="red", fill='') # asterisk to unpack
+        self.oval = self.canvas.create_oval(self.center_coords[0] - 2,
+                                            self.center_coords[1] - 2,
+                                            self.center_coords[0] + 2,
+                                            self.center_coords[1] + 2,
+                                            fill="red")
+
+    def on_click(self, event):
+        self.new_x, self.new_y = event.x, event.y # integers
+        dx, dy = self.new_x - self.bbox_coords[2][0], \
+                 self.new_y - self.bbox_coords[2][1]
+        # update self.bbox_coords
+        self.bbox_coords[:,0] += dx
+        self.bbox_coords[:,1] += dy
+        self.center_coords[0] += dx
+        self.center_coords[1] += dy
+        self.draw_rectangle()
+
+        # save the new bbox coords in the dictionary
+        rv_bbox_coords = self.bbox_coords * np.array([1920/self.fs[0], 1080/self.fs[1]])
+        self.event_dict[self.event_list[self.event_idx]]["rv_rot_rect_box"][self.frame_idx] = rv_bbox_coords.tolist()
+        
+        # save updated bbox dims in the dictionary (the box center changed)
+        # "rv_rot_rect_box_dim" (x_c, y_c, yaw, w, h, a)
+        self.event_dict[self.event_list[self.event_idx]]["rv_rot_rect_box_dim"][self.frame_idx][0] = self.center_coords[0]*(1920/self.fs[0])
+        self.event_dict[self.event_list[self.event_idx]]["rv_rot_rect_box_dim"][self.frame_idx][1] = self.center_coords[1]*(1080/self.fs[1])
+
+
+    def next_image(self, event):
+        self.canvas.delete("all")
+        if self.frame_idx == len(self.event_dict[self.event_list[self.event_idx]]["frames"]) - 1:
+            self.frame_idx = 0
+            self.event_idx += 1
+            if self.event_idx == len(self.event_dict): # circular
+                self.event_idx = 0
+        else:
+            self.frame_idx += 1    
+
+        self.l_progress.config(text=self.event_dict[self.event_list[self.event_idx]]['frames'][self.frame_idx]+'\n\n'+f"Event {self.event_idx}/{len(self.event_dict)}")
+        if self.event_dict[self.event_list[self.event_idx]]['difficult'][self.frame_idx] == 0: fg = "green"
+        else: fg = "red"
+        self.l_diff.config(text=f"Current frame has difficult label {self.event_dict[self.event_list[self.event_idx]]['difficult'][self.frame_idx]}",
+                           fg=fg)
+
+        demo_pic = Image.open(os.path.join(self.image_path, self.event_dict[self.event_list[self.event_idx]]['frames'][self.frame_idx]+'.png'))
+        demo_pic_resized = demo_pic.resize((self.fs[0], self.fs[1]), Image.Resampling.LANCZOS)
+        self.demo_img = ImageTk.PhotoImage(demo_pic_resized)
+        self.canvas.create_image(0, 0, anchor=tk.NW, image=self.demo_img)
+        
+        self.bbox_coords = np.array(self.event_dict[self.event_list[self.event_idx]]["rv_rot_rect_box"][self.frame_idx])
+        self.bbox_coords *= ([self.fs[0]/1920, self.fs[1]/1080])
+        self.bbox_coords = np.float_(self.bbox_coords) # br, tr, tl, bl
+        self.center_coords = np.array(self.event_dict[self.event_list[self.event_idx]]["rv_rot_rect_box_dim"][self.frame_idx][:2])
+        self.center_coords *= ([self.fs[0]/1920, self.fs[1]/1080])
+        self.draw_rectangle()
+
+
+    def prev_image(self, event):
+        self.canvas.delete("all")
+        # update event_idx first, if currently the first image
+        if self.frame_idx == 0:
+            if self.event_idx == 0:
+                self.event_idx = len(self.event_dict) - 1
+            else:
+                self.event_idx -= 1
+            len_frames = len(self.event_dict[self.event_list[self.event_idx]]['frames'])
+            self.frame_idx = len_frames - 1
+        else:
+            self.frame_idx -= 1
+        self.l_progress.config(text=self.event_dict[self.event_list[self.event_idx]]['frames'][self.frame_idx]+'\n\n'+f"Event {self.event_idx}/{len(self.event_dict)}")
+        if self.event_dict[self.event_list[self.event_idx]]['difficult'][self.frame_idx] == 0: fg = "green"
+        else: fg = "red"
+        self.l_diff.config(text=f"Current frame has difficult label {self.event_dict[self.event_list[self.event_idx]]['difficult'][self.frame_idx]}",
+                           fg=fg)
+
+        demo_pic = Image.open(os.path.join(self.image_path, self.event_dict[self.event_list[self.event_idx]]['frames'][self.frame_idx]+'.png'))
+        demo_pic_resized = demo_pic.resize((self.fs[0], self.fs[1]), Image.Resampling.LANCZOS)
+        self.demo_img = ImageTk.PhotoImage(demo_pic_resized)
+        self.canvas.create_image(0, 0, anchor=tk.NW, image=self.demo_img)
+        
+        self.bbox_coords = np.array(self.event_dict[self.event_list[self.event_idx]]["rv_rot_rect_box"][self.frame_idx])
+        self.bbox_coords *= ([self.fs[0]/1920, self.fs[1]/1080])
+        self.bbox_coords = np.float_(self.bbox_coords) # br, tr, tl, bl
+        self.center_coords = np.array(self.event_dict[self.event_list[self.event_idx]]["rv_rot_rect_box_dim"][self.frame_idx][:2])
+        self.center_coords *= ([self.fs[0]/1920, self.fs[1]/1080])
+        self.draw_rectangle()
+
+    
+    def add_difficult_label(self, event):
+        # update the difficult label
+        self.event_dict[self.event_list[self.event_idx]]['difficult'][self.frame_idx] = 1
+        self.l_diff.config(text=f"Current frame has difficult label {self.event_dict[self.event_list[self.event_idx]]['difficult'][self.frame_idx]}",
+                           fg="red")
+
+
+    def save_label_data(self):
+        # save current self.event_idx, self.frame_idx in the filename. so that editting can happen from the current event_idx next time
+        with open(self.save_json_path.split(".")[0]+f"_{self.event_idx}_{self.frame_idx}.json", 'w', encoding='utf-8') as outfile:
+            json.dump(self.event_dict, outfile)
+        print('Manually labeled data saved!')
+        
+
+    def quit_and_save(self):
+        self.save_label_data()
+        self.root.destroy()
+
+
+if __name__ == "__main__":
+    # Arguments
+    parser = argparse.ArgumentParser()
+    parser.add_argument('-d', '--data-folder-path', type=str, default='', required=True, help='data folder path')
+    parser.add_argument('-p', '--prev-json-path', type=str, default='', required=True, help='previous json path')
+    parser.add_argument('-e', '--event-type-path', type=str, default='', required=True, help='event class taxonomy path')
+    parser.add_argument('-s', '--save-json-path', type=str, default='', required=True, help='path to save updated json')
+    parser.add_argument('-f', '--frame-size', type=int, nargs='+', required=True, help='tkinter canvas frame size')
+    args = parser.parse_args()
+
+    # Tkinter init
+    # pdb.set_trace()
+    root = tk.Tk()
+    app = BoundingBoxAppv2(
+                           root, 
+                           image_path=os.path.join(args.data_folder_path, "undistorted_rv"),
+                           wheelAccel_path=os.path.join(args.data_folder_path, "wheelAccel_seg"),
+                           prev_json_path=args.prev_json_path,
+                           save_json_path=args.save_json_path,
+                           event_type_path=args.event_type_path,
+                           frame_size=args.frame_size
+                           )
+    root.mainloop()
+# %%

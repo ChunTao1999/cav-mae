@@ -53,7 +53,7 @@ class BoundingBoxApp:
 
 
     def setup_ui(self):
-        self.root.title("Road Event Dataset Labeling Tool v2.0")
+        self.root.title("Road Event Dataset Labeling Tool v1.1")
         self.root.geometry("1280x720")
         self.root.columnconfigure([0, 1], minsize=200, weight=1)
         self.root.rowconfigure(0, minsize=200, weight=1)

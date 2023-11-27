@@ -8,13 +8,19 @@ import matplotlib.pyplot as plt
 import numpy as np
 import os
 import pandas as pd
+import PIL
+from PIL import Image
 import subprocess
 import torch
+import torch.nn as nn
 import torch.nn.functional as nnF
+import torchvision.transforms as T
+from torchvision.utils import save_image
 from matplotlib.ticker import PercentFormatter
 from scipy.signal import find_peaks
 from scipy.spatial import ConvexHull
 from sklearn.metrics import confusion_matrix
+from sklearn.model_selection import train_test_split
 import seaborn as sns
 import pdb # for debug
 
@@ -109,7 +115,7 @@ def compute_event_loc_dist_curves(event_timeoffset,
                                   frame_dist,
                                   wheel_to_base_dist,
                                   base_pixel,
-                                  wheel_width,
+                                  track_width,
                                   veh_speed,
                                   veh_yawrate,
                                   xm_per_pix,
@@ -130,9 +136,9 @@ def compute_event_loc_dist_curves(event_timeoffset,
     # accumulate vertical travel distance until it passes wheel to base distance
     # travel_dist = 0
     if event_left==1 and event_right==0:
-        current_boxcenter = np.array([frame_dim[0]/2+wheel_width/2/xm_per_pix, frame_dim[1]-base_pixel+wheel_to_base_dist/ym_per_pix])
+        current_boxcenter = np.array([frame_dim[0]/2+track_width/2/xm_per_pix, frame_dim[1]-base_pixel+wheel_to_base_dist/ym_per_pix])
     elif event_left==0 and event_right==1:
-        current_boxcenter = np.array([frame_dim[0]/2-wheel_width/2/xm_per_pix, frame_dim[1]-base_pixel+wheel_to_base_dist/ym_per_pix])
+        current_boxcenter = np.array([frame_dim[0]/2-track_width/2/xm_per_pix, frame_dim[1]-base_pixel+wheel_to_base_dist/ym_per_pix])
     else: # both 1s
         current_boxcenter = np.array([frame_dim[0]/2, frame_dim[1]-base_pixel+wheel_to_base_dist/ym_per_pix])
     vec_idx = 0
@@ -147,8 +153,7 @@ def compute_event_loc_dist_curves(event_timeoffset,
         # print(inv_boxcenter, inv_rotate_origin)
         inv_current_boxcenter = rotate(origin=inv_rotate_origin,
                                        point=inv_boxcenter,
-                                       angle=yawrate_vec[vec_idx,1] * 0.01,
-                                       aspect_ratio=xm_per_pix/ym_per_pix)
+                                       angle=yawrate_vec[vec_idx,1] * 0.01)
         current_boxcenter = cv2.perspectiveTransform(np.float32([[inv_current_boxcenter]]), resmatrix)[0][0]
         accum_angle += yawrate_vec[vec_idx,1] * 0.01
         accum_boxcenter.append(copy.deepcopy(current_boxcenter))
@@ -180,7 +185,7 @@ def compute_event_loc_dist_curves_2(event_timeoffset,
                                     frame_dist,
                                     wheel_to_base_dist,
                                     base_pixel,
-                                    wheel_width,
+                                    track_width,
                                     veh_speed,
                                     veh_yawrate,
                                     xm_per_pix,
@@ -193,9 +198,9 @@ def compute_event_loc_dist_curves_2(event_timeoffset,
     speed_vec, yawrate_vec = veh_speed[start_idx:end_idx].to_numpy(), \
                              veh_yawrate[start_idx:end_idx].to_numpy()
     if event_left==1 and event_right==0:
-        current_boxcenter = np.array([frame_dim[0]/2+wheel_width/2/xm_per_pix, frame_dim[1]-base_pixel+wheel_to_base_dist/ym_per_pix])
+        current_boxcenter = np.array([frame_dim[0]/2+track_width/2/xm_per_pix, frame_dim[1]-base_pixel+wheel_to_base_dist/ym_per_pix])
     elif event_left==0 and event_right==1:
-        current_boxcenter = np.array([frame_dim[0]/2-wheel_width/2/xm_per_pix, frame_dim[1]-base_pixel+wheel_to_base_dist/ym_per_pix])
+        current_boxcenter = np.array([frame_dim[0]/2-track_width/2/xm_per_pix, frame_dim[1]-base_pixel+wheel_to_base_dist/ym_per_pix])
     else: # both 1s
         current_boxcenter = np.array([frame_dim[0]/2, frame_dim[1]-base_pixel+wheel_to_base_dist/ym_per_pix])
     accum_boxcenter = [current_boxcenter]
@@ -232,15 +237,87 @@ def compute_event_loc_dist_curves_2(event_timeoffset,
     for idx, point in enumerate(pts_bev):
         rotated_point = rotate(origin=current_boxcenter,
                                point=point,
-                               angle=(np.pi/2 - headings[0])*(8.8/4.318),
-                               aspect_ratio=8.8/4.318)
+                               angle=(np.pi/2 - headings[0])*(8.8/4.318))
         pts_bev_rotated[idx] = rotated_point
     pts_bev_rotated = np.clip(pts_bev_rotated, 10, 590)
     pts_inv_rotated = cv2.perspectiveTransform(np.float32([pts_bev_rotated]), resmatrix_inv)[0]
     return pts_bev_rotated, pts_inv_rotated, accum_boxcenter
 
 
-def rotate(origin, point, angle, aspect_ratio): # angle in radians
+def compute_event_loc_dist_curves_final(event_timeoffset,
+                                        event_left,
+                                        event_right,
+                                        event_len_pix,
+                                        event_len_scale,
+                                        frame_image,
+                                        frame_dim,
+                                        frame_timeoffset,
+                                        frame_dist,
+                                        wheel_to_base_dist,
+                                        base_pixel,
+                                        track_width,
+                                        wheel_width,
+                                        wheel_diameter,
+                                        veh_speed,
+                                        veh_yawrate,
+                                        xm_per_pix,
+                                        ym_per_pix,
+                                        resmatrix_inv,
+                                        resmatrix):
+    """Final method: 1) trace the center location in BEV 2) compute and apply rotation in world BEV, transform back to BEV and project to RV 3) visualize in BEV and RV"""
+    start_idx = bisect.bisect_left(veh_speed.iloc[:,0], event_timeoffset)
+    end_idx = bisect.bisect_right(veh_speed.iloc[:,0], frame_timeoffset)
+    speed_vec, yawrate_vec = veh_speed[start_idx:end_idx].to_numpy(), \
+                             veh_yawrate[start_idx:end_idx].to_numpy()
+    if event_left==1 and event_right==0:
+        current_boxcenter = np.array([frame_dim[0]/2+track_width/2/xm_per_pix, frame_dim[1]-base_pixel+wheel_to_base_dist/ym_per_pix])
+    elif event_left==0 and event_right==1:
+        current_boxcenter = np.array([frame_dim[0]/2-track_width/2/xm_per_pix, frame_dim[1]-base_pixel+wheel_to_base_dist/ym_per_pix])
+    else: # both 1s
+        current_boxcenter = np.array([frame_dim[0]/2, frame_dim[1]-base_pixel+wheel_to_base_dist/ym_per_pix])
+    accum_boxcenter = [current_boxcenter]
+    # yawrate in radians/sec, positive for left turn, negative for right turn
+    headings = np.cumsum(yawrate_vec[:,1]*0.01)
+    headings -= headings[-1]
+    headings += np.pi / 2 # vertical up is pi/2 radians
+    # cum_x_shift = np.sum(np.cos(headings)*speed_vec[:,1]*0.01) # in meters
+    # cum_y_shift = -np.sum(np.sin(headings)*speed_vec[:,1]*0.01) # in meters
+    # pixel_x_shift = cum_x_shift / xm_per_pix
+    # pixel_y_shift = cum_y_shift / ym_per_pix
+    # final_boxcenter = current_boxcenter + np.array([pixel_x_shift, pixel_y_shift])
+    for vec_idx in np.arange(len(speed_vec))[::-1]:
+        current_boxcenter[0] += (np.cos(headings[vec_idx])*speed_vec[:,1][vec_idx]*0.01)/xm_per_pix
+        current_boxcenter[1] -= (np.sin(headings[vec_idx])*speed_vec[:,1][vec_idx]*0.01)/ym_per_pix
+        accum_boxcenter.append(copy.deepcopy(current_boxcenter))
+    pts_bev = np.float32([[current_boxcenter[0]-wheel_width*event_len_scale/2/xm_per_pix, 
+                           current_boxcenter[1]-wheel_diameter*event_len_scale/2/ym_per_pix], # topleft
+                          [current_boxcenter[0]+wheel_width*event_len_scale/2/xm_per_pix, 
+                           current_boxcenter[1]-wheel_diameter*event_len_scale/2/ym_per_pix], # topright
+                          [current_boxcenter[0]-wheel_width*event_len_scale/2/xm_per_pix, 
+                           current_boxcenter[1]+wheel_diameter*event_len_scale/2/ym_per_pix], # bottomleft
+                          [current_boxcenter[0]+wheel_width*event_len_scale/2/xm_per_pix, 
+                           current_boxcenter[1]+wheel_diameter*event_len_scale/2/ym_per_pix]]) # bottomright
+    pt_bev_center = np.float32(current_boxcenter)
+    pt_world_bev_center = pt_bev_center * np.array([xm_per_pix, ym_per_pix])
+    pts_bev_rot = np.zeros_like(pts_bev)
+    for idx, point in enumerate(pts_bev):
+        # 1. First convert the BEV coordinates to world BEV coordinates in meters
+        # 2. Apply the rotation matrix with computed $\angle \alpha_{total}$ in the BEV and find shift for each vertice in meters
+        # 3. Convert the shift in meters to shift in pixels, so that the same rotation can be applied in our BEV frame
+        # 4. Once the bounding box in the BEV frame is rotated, project to the RV frame using the IPM matrix
+        # pdb.set_trace()
+        point_world_bev = point * np.array([xm_per_pix, ym_per_pix])
+        rot_point_world_bev = rotate(origin=pt_world_bev_center,
+                                     point=point_world_bev,
+                                     angle=(np.pi/2 - headings[0])) # the rotated point has units of meters
+        rot_point_bev = rot_point_world_bev / np.array([xm_per_pix, ym_per_pix])                        
+        pts_bev_rot[idx] = rot_point_bev
+    pts_bev_rot = np.clip(pts_bev_rot, 5, 595) # rotated rect box in bev
+    pts_inv_rot = cv2.perspectiveTransform(np.float32([pts_bev_rot]), resmatrix_inv)[0] # poly in rv
+    return pts_bev_rot, pts_inv_rot, accum_boxcenter
+
+
+def rotate(origin, point, angle): # angle in radians
     """Rotate a point cclw by a given angle around a given origin point"""
     ox, oy = origin
     px, py = point
@@ -249,13 +326,13 @@ def rotate(origin, point, angle, aspect_ratio): # angle in radians
     return qx, qy
 
 
-def add_bbox_to_frame(image, pts_inv):
+def add_bbox_to_frame(image, pts):
     image_height, image_width, image_ch = image.shape
     debug_image = copy.deepcopy(image)
-    pts_inv = pts_inv[[0,1,3,2], :] # in order to draw in the correct order across points
-    pts_inv = pts_inv.reshape((-1, 1, 2))
+    pts = pts[[0,1,3,2], :] # in order to draw in the correct order across points
+    pts = pts.reshape((-1, 1, 2))
     debug_image = cv2.polylines(img=debug_image,
-                                pts=np.int32([pts_inv]),
+                                pts=np.int32([pts]),
                                 isClosed=True,
                                 color=[255,255,255],
                                 thickness=10)
@@ -273,7 +350,7 @@ def add_accum_boxcenter(image, accum_boxcenter): # a list
     return image
 
 
-def boox_coords_to_bbox_label(pts_inv):
+def bbox_coords_to_bbox_label(pts_inv):
     """Convert from 4 bbox coordinates to a bbox label representation (topleft_x, topleft_y, width, height), needs to be json-serializable too"""
     bbox_label = pts_inv.tolist()
     return bbox_label
@@ -468,3 +545,90 @@ def compute_union_area(pred_vertices, target_vertices, intersection_areas):
     total_areas_target = torch.stack([polygon_area(poly.view(-1, 2)) for poly in target_vertices])
     union_areas = total_areas_predicted + total_areas_target - intersection_areas
     return union_areas
+
+
+def initialize_weights(m):
+  if isinstance(m, nn.Conv2d):
+      nn.init.kaiming_uniform_(m.weight.data, nonlinearity='relu')
+      if m.bias is not None:
+          nn.init.constant_(m.bias.data, 0)
+  elif isinstance(m, nn.BatchNorm2d):
+      nn.init.constant_(m.weight.data, 1)
+      nn.init.constant_(m.bias.data, 0)
+  elif isinstance(m, nn.Linear):
+      nn.init.kaiming_uniform_(m.weight.data)
+      nn.init.constant_(m.bias.data, 0)
+
+
+def split_train_val_test(metafile_path, data_folder_path, seed, split_ratio):
+    # use train_test_split 
+    with open(metafile_path, 'r') as f:
+        data_dict = json.load(f)
+    frame_names = []
+    for event_id, value in data_dict.items():
+        for fn in value['frames']:
+            frame_names.append(fn)
+    train_files, test_files = train_test_split(frame_names, test_size=split_ratio[1]+split_ratio[2], random_state=seed)
+    val_files, test_files = train_test_split(test_files, test_size=split_ratio[2]/(split_ratio[1]+split_ratio[2]), random_state=seed)
+    
+    split_dict = {}
+    for frame_name in frame_names:
+        if frame_name in train_files:
+            split_dict[frame_name] = 0
+        elif frame_name in val_files:
+            split_dict[frame_name] = 1
+        else:
+            split_dict[frame_name] = 2
+    return split_dict
+
+
+def calculate_normalization(metafile_path, data_folder_path, split_dict):
+    # iterate over images described in the metafile, in the data folder. make a tensor for all images, calculate mean and std over the entire dataset
+    frame_transform = T.Compose([T.Resize(size=[256,256], 
+                                          interpolation=T.InterpolationMode.BILINEAR),
+                                 T.ToTensor()])
+    count_frames = 0
+    with open(metafile_path, 'r') as f:
+        data_dict = json.load(f)
+    for event_id, value in data_dict.items():
+        for fn in value['frames']:
+            if split_dict[fn] == 0:
+                event_frame = Image.open(os.path.join(data_folder_path, 'undistorted_rv', fn+'.png'))
+                event_frame_tensor = frame_transform(event_frame)
+                if count_frames == 0:
+                    all_frame_tensor = event_frame_tensor.unsqueeze(0)
+                else:
+                    all_frame_tensor = torch.cat((all_frame_tensor, event_frame_tensor.unsqueeze(0)), dim=0)
+                count_frames += 1
+                if count_frames % 100 == 0:
+                    print(f"Progress: {count_frames}")
+            else:
+                continue
+    print(f"Training set size: {count_frames:d}")
+    all_frame_tensor = all_frame_tensor.permute(1, 0, 2, 3).contiguous().view(3, -1)
+    return all_frame_tensor.mean(dim=1), all_frame_tensor.std(dim=1)
+
+
+def visualize_frame_bbox(frame_tensor, mean, std, bbox_tensor, save_name):
+    unnormalize = T.Normalize(mean=[-m/s for m,s in zip(mean, std)], std=[1/s for s in std])
+    fig, ax = plt.subplots(figsize=(12,12))
+    ax.imshow(unnormalize(frame_tensor).permute(1, 2, 0).detach().cpu().numpy()) # (h, w, c)
+    if bbox_tensor.shape[0] > 0:
+        bbox = _corners(*bbox_tensor)
+        ax.fill(bbox[:, 0], bbox[:, 1], facecolor="none", edgecolor="r")
+    ax.axis("off")
+    plt.savefig(fname=os.path.join("visualize", save_name+".png"))
+    return 
+
+
+def _rotate(points: np.ndarray, theta: float) -> np.ndarray:
+    """Rotates the points counterclockwise by multiplying by the rotation matrix, around the origin"""
+    return points @ np.array([[np.cos(theta), -np.sin(theta)], [np.sin(theta), np.cos(theta)]])
+
+
+def _corners(pos_x: float, pos_y: float, yaw: float, width: float, height: float) -> np.ndarray:
+    points = np.array([[1, 1], [-1, 1], [-1, -1], [1, -1]]).astype(np.float)
+    points *= np.array([width, height]) / 2
+    points = _rotate(points, yaw)
+    points += np.array([pos_x, pos_y])
+    return points

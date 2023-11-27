@@ -1,14 +1,12 @@
 # DATA_FOLDER_PATH=/home/nano01/a/tao88/RoadEvent-Dataset/frames_rv
-DATA_FOLDER_PATH=/home/nano01/a/tao88/RoadEvent-shared/CV/events_8.18
-PREV_JSON_PATH=/home/nano01/a/tao88/RoadEvent-Dataset-Source/datafiles/events_metafile_8.18.json
-JSON_SAVE_PATH=/home/nano01/a/tao88/RoadEvent-Dataset-Source/datafiles/events_metafile_manually_labeled_8.18_new.json
-EVENT_TYPE_PATH=/home/nano01/a/tao88/RoadEvent-Dataset-Source/datafiles/event_types_manual_label.json
-FRAMES_PER_EVENT=4
+DATA_FOLDER_PATH=/home/nano01/a/tao88/RoadEvent-Dataset-Internal-Final
+PREV_JSON_PATH=/home/nano01/a/tao88/RoadEvent-Dataset-Internal-Final/datafiles/events_cleaned_editted_775.json
+JSON_SAVE_PATH=/home/nano01/a/tao88/RoadEvent-Dataset-Internal-Final/datafiles/events_metafile_with_labels_cleaned_editted.json
+EVENT_TYPE_PATH=/home/nano01/a/tao88/RoadEvent-Dataset-Internal-Final/datafiles/event_types_manual_label.json
 
 python3 postprocess_data.py \
 -d ${DATA_FOLDER_PATH} \
 -p ${PREV_JSON_PATH} \
 -e ${EVENT_TYPE_PATH} \
 -s ${JSON_SAVE_PATH} \
--n ${FRAMES_PER_EVENT} \
--f 800 450
+-f 960 540

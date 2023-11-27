@@ -110,7 +110,7 @@ eventMarking_conf = {'cv2_imread_frame_dim': (1920, 1080), # (w, h)
                      'bev_frame_dim': (600,600),
                      'wheel_to_base_dist': 3.5, # 4.572
                      'base_pixel': 20,
-                     'wheel_width': 1.664,
+                     'track_width': 1.664,
                      'xm_per_pix': 4.318/500,
                      'ym_per_pix': 8.8/330, # 8.89
                      'event_len_pix': 200}

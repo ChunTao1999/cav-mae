@@ -7,8 +7,10 @@ import pandas as pd
 import os
 import subprocess
 import matplotlib.pyplot as plt
-from utils import compute_event_loc_dist_curves, compute_event_loc_dist_curves_2, add_bbox_to_frame, add_accum_boxcenter, boox_coords_to_bbox_label
+from utils import compute_event_loc_dist_curves, compute_event_loc_dist_curves_2, compute_event_loc_dist_curves_final
+from utils import add_bbox_to_frame, add_accum_boxcenter, bbox_coords_to_bbox_label
 from utils import normalize_wheel_accel, settling_time_and_dist
+from find_min_rect_bbox import minBoundingRect
 import pdb # for debug
 
 
@@ -202,33 +204,35 @@ def preprocess(cal_data_path,
                 frame = cv2.undistort(frame, mtx, dist)
                 road_event_dict['data'][event_id]['frame_paths'].append(os.path.join(origFrame_imsave_rv_path, frame_name))
                 cv2.imwrite(os.path.join(origFrame_imsave_rv_path, frame_name), frame)
-                pts_bev, pts_inv, accum_boxcenter = compute_event_loc_dist_curves_2(event_timeoffset=event_timestamp+eventmarking_conf['event_timestamp_shift'],
-                                                                                    event_left=session_eventDict[float(format(event_timestamp, '.3f'))][1],
-                                                                                    event_right=session_eventDict[float(format(event_timestamp, '.3f'))][2],
-                                                                                    frame_image=frame,
-                                                                                    frame_dim=eventmarking_conf['bev_frame_dim'],
-                                                                                    frame_timeoffset=frame_timestamp+eventmarking_conf['frame_timestamp_shift'],
-                                                                                    frame_dist=frame_dist,
-                                                                                    wheel_to_base_dist=eventmarking_conf['wheel_to_base_dist'],
-                                                                                    base_pixel=eventmarking_conf['base_pixel'],
-                                                                                    wheel_width=eventmarking_conf['wheel_width'],
-                                                                                    veh_speed=veh_speed,
-                                                                                    veh_yawrate=veh_yawrate,
-                                                                                    xm_per_pix=eventmarking_conf['xm_per_pix'],
-                                                                                    ym_per_pix=eventmarking_conf['ym_per_pix'],
-                                                                                    event_len_pix=eventmarking_conf['event_len_pix'],
-                                                                                    resmatrix_inv=resmatrix_inv,
-                                                                                    resmatrix=resmatrix)
+                pts_bev, pts_inv, accum_boxcenter = compute_event_loc_dist_curves_final(event_timeoffset=event_timestamp+eventmarking_conf['event_timestamp_shift'],
+                                                                                        event_left=session_eventDict[float(format(event_timestamp, '.3f'))][1],
+                                                                                        event_right=session_eventDict[float(format(event_timestamp, '.3f'))][2],
+                                                                                        frame_image=frame,
+                                                                                        frame_dim=eventmarking_conf['bev_frame_dim'],
+                                                                                        frame_timeoffset=frame_timestamp+eventmarking_conf['frame_timestamp_shift'],
+                                                                                        frame_dist=frame_dist,
+                                                                                        wheel_to_base_dist=eventmarking_conf['wheel_to_base_dist'],
+                                                                                        base_pixel=eventmarking_conf['base_pixel'],
+                                                                                        track_width=eventmarking_conf['track_width'],
+                                                                                        wheel_width=eventmarking_conf['wheel_width'],
+                                                                                        wheel_diameter=eventmarking_conf['wheel_diameter'],
+                                                                                        veh_speed=veh_speed,
+                                                                                        veh_yawrate=veh_yawrate,
+                                                                                        xm_per_pix=eventmarking_conf['xm_per_pix'],
+                                                                                        ym_per_pix=eventmarking_conf['ym_per_pix'],
+                                                                                        event_len_pix=eventmarking_conf['event_len_pix'],
+                                                                                        resmatrix_inv=resmatrix_inv,
+                                                                                        resmatrix=resmatrix)
                 frame_rv = add_bbox_to_frame(image=frame,
-                                             pts_inv=pts_inv)
+                                             pts=pts_inv)
                 frame_bev = cv2.warpPerspective(np.float32(frame),
                                                 resmatrix,
                                                 eventmarking_conf['bev_frame_dim'])
                 frame_bev = add_accum_boxcenter(image=frame_bev,
                                                 accum_boxcenter=accum_boxcenter)
                 frame_bev = add_bbox_to_frame(image=frame_bev,
-                                              pts_inv=pts_bev)
-                road_event_dict['data'][event_id]['bbox_coords'].append(boox_coords_to_bbox_label(pts_inv))
+                                              pts=pts_bev)
+                road_event_dict['data'][event_id]['bbox_coords'].append(bbox_coords_to_bbox_label(pts_inv))
                 if plot_processedFrames:
                     cv2.imwrite(os.path.join(processedFrame_imsave_rv_path, f'session_{session_id:d}_event_{event_timestamp:.3f}_frame_{frame_idx:d}_at_time_{frame_timestamp:.3f}_dist_{frame_dist:.3f}_rv.png'), frame_rv) 
                     cv2.imwrite(os.path.join(processedFrame_imsave_bev_path, f'session_{session_id:d}_event_{event_timestamp:.3f}_frame_{frame_idx:d}_at_time_{frame_timestamp:.3f}_dist_{frame_dist:.3f}_bev.png'), frame_bev) 
@@ -397,8 +401,12 @@ def preprocess_internal(session_list,
 
             # 2. Process one/all of the frames relevant to the current event
             road_event_dict[event_id]['frames'] = []
-            road_event_dict[event_id]['rectangle_boxcenter'] = []
-            road_event_dict[event_id]['polygon_box'] = []
+            road_event_dict[event_id]['bev_boxcenter'] = []
+            road_event_dict[event_id]['bev_rot_rect_box'] = []
+            road_event_dict[event_id]['rv_poly_box'] = []
+            road_event_dict[event_id]['rv_rot_rect_box'] = []
+            road_event_dict[event_id]['rv_rot_rect_box_dim'] = []
+
             for frame_idx, [frame_timestamp, frame_dist] in enumerate(values): # for each frame
                 frame_name = f'session_{session_id:d}_event_{(event_timestamp+session_timeShift):.3f}_frame_{frame_idx:d}_at_time_{frame_timestamp:.3f}_dist_{frame_dist:.3f}.png'
                 frame = cv2.imread(os.path.join(data_path, sessionFolderName, '_'.join(frame_name.split('_')[2:])))  
@@ -406,42 +414,62 @@ def preprocess_internal(session_list,
                 frame_id = event_id + f"_{frame_idx:d}_{(frame_timestamp-session_timeShift):.3f}_{wheel_number:d}".replace(".", "")
                 road_event_dict[event_id]['frames'].append(frame_id)
                 cv2.imwrite(os.path.join(save_path ,"undistorted_rv", frame_id+".png"), frame)
-                pts_bev, pts_inv, accum_boxcenter = compute_event_loc_dist_curves_2(event_timeoffset=event_timestamp+eventmarking_conf['event_timestamp_shift'],
-                                                                                    event_left=session_eventDict[event_timestamp][1],
-                                                                                    event_right=session_eventDict[event_timestamp][2],
-                                                                                    frame_image=frame,
-                                                                                    frame_dim=eventmarking_conf['bev_frame_dim'],
-                                                                                    frame_timeoffset=frame_timestamp-session_timeShift+eventmarking_conf['frame_timestamp_shift'],
-                                                                                    frame_dist=frame_dist,
-                                                                                    wheel_to_base_dist=eventmarking_conf['wheel_to_base_dist'],
-                                                                                    base_pixel=eventmarking_conf['base_pixel'],
-                                                                                    wheel_width=eventmarking_conf['wheel_width'],
-                                                                                    veh_speed=veh_speed,
-                                                                                    veh_yawrate=veh_yawrate,
-                                                                                    xm_per_pix=eventmarking_conf['xm_per_pix'],
-                                                                                    ym_per_pix=eventmarking_conf['ym_per_pix'],
-                                                                                    event_len_pix=eventmarking_conf['event_len_pix'],
-                                                                                    resmatrix_inv=resmatrix_inv,
-                                                                                    resmatrix=resmatrix)
-                frame_rv = add_bbox_to_frame(image=frame,
-                                             pts_inv=pts_inv)
+                pts_bev, pts_inv, accum_boxcenter = compute_event_loc_dist_curves_final(event_timeoffset=event_timestamp+eventmarking_conf['event_timestamp_shift'],
+                                                                                        event_left=session_eventDict[event_timestamp][1],
+                                                                                        event_right=session_eventDict[event_timestamp][2],
+                                                                                        frame_image=frame,
+                                                                                        frame_dim=eventmarking_conf['bev_frame_dim'],
+                                                                                        frame_timeoffset=frame_timestamp-session_timeShift+eventmarking_conf['frame_timestamp_shift'],
+                                                                                        frame_dist=frame_dist,
+                                                                                        wheel_to_base_dist=eventmarking_conf['wheel_to_base_dist'],
+                                                                                        base_pixel=eventmarking_conf['base_pixel'],
+                                                                                        track_width=eventmarking_conf['track_width'],
+                                                                                        wheel_width=eventmarking_conf['wheel_width'],
+                                                                                        wheel_diameter=eventmarking_conf['wheel_diameter'],
+                                                                                        veh_speed=veh_speed,
+                                                                                        veh_yawrate=veh_yawrate,
+                                                                                        xm_per_pix=eventmarking_conf['xm_per_pix'],
+                                                                                        ym_per_pix=eventmarking_conf['ym_per_pix'],
+                                                                                        event_len_pix=eventmarking_conf['event_len_pix'],
+                                                                                        event_len_scale=eventmarking_conf['event_len_scale'],
+                                                                                        resmatrix_inv=resmatrix_inv,
+                                                                                        resmatrix=resmatrix)
+                # pts_bev are vertices of the rotated rectangle in bev
+                # pts_inv are vertices of the transformed polygon in rv
+                # modified 10/26
+                min_bbox = minBoundingRect(pts_inv) # rot_angle, area, width, height, center_point, corner_points
+                road_event_dict[event_id]['bev_boxcenter'].append(bbox_coords_to_bbox_label(accum_boxcenter[-1]))
+                road_event_dict[event_id]['bev_rot_rect_box'].append(bbox_coords_to_bbox_label(pts_bev))
+                road_event_dict[event_id]['rv_poly_box'].append(bbox_coords_to_bbox_label(pts_inv))
+                road_event_dict[event_id]['rv_rot_rect_box'].append(bbox_coords_to_bbox_label(min_bbox[-1]))
+                # Note: save rv_rot_rect_box dimensions and area as well (x_c, y_c, yaw, w, h, a)
+                road_event_dict[event_id]['rv_rot_rect_box_dim'].append([min_bbox[4][0], 
+                                                                         min_bbox[4][1],
+                                                                         min_bbox[0],
+                                                                         min_bbox[2],
+                                                                         min_bbox[3],
+                                                                         min_bbox[1]])
+
+
+                frame_rv_annotated = add_bbox_to_frame(image=frame,
+                                                       pts=min_bbox[-1][[0,1,3,2], :])
                 frame_bev = cv2.warpPerspective(np.float32(frame),
                                                 resmatrix,
                                                 eventmarking_conf['bev_frame_dim'])
-                frame_bev = add_accum_boxcenter(image=frame_bev,
-                                                accum_boxcenter=accum_boxcenter)
-                frame_bev = add_bbox_to_frame(image=frame_bev,
-                                              pts_inv=pts_bev)
-                road_event_dict[event_id]['rectangle_boxcenter'].append(boox_coords_to_bbox_label(accum_boxcenter[-1]))
-                road_event_dict[event_id]['polygon_box'].append(boox_coords_to_bbox_label(pts_inv))
+                frame_bev_annotated = add_accum_boxcenter(image=frame_bev,
+                                                          accum_boxcenter=accum_boxcenter)
+                frame_bev_annotated = add_bbox_to_frame(image=frame_bev_annotated,
+                                                        pts=pts_bev)
                 if plot_processedFrames:
-                    cv2.imwrite(os.path.join(save_path ,"undistorted_rv_annotated", frame_id+".png"), frame_rv) 
-                    cv2.imwrite(os.path.join(save_path ,"undistorted_bev_annotated", frame_id+".png"), frame_bev) 
+                    cv2.imwrite(os.path.join(save_path, "undistorted_rv_annotated", frame_id+".png"), frame_rv_annotated) 
+                    cv2.imwrite(os.path.join(save_path, "undistorted_bev_annotated", frame_id+".png"), frame_bev_annotated) 
                 print('\tsession_{:d}_event_{:.3f}_frame_{}_at_time_{:.3f}_dist_{:.3f}'.format(session_id,
                                                                                                event_timestamp,
                                                                                                frame_idx, 
                                                                                                frame_timestamp-session_timeShift,
                                                                                                frame_dist))
+                pdb.set_trace()
+                
                 frame_count += 1
             event_count += 1        
         print(f'{sessionFolderName} processed......')

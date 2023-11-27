@@ -35,6 +35,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument('-c', '--calibrate', type=int, default=0, required=True, help='whether to calibrate camera and save camera matrices, 0 for True')
 parser.add_argument('-p', '--perspective', type=int, default=0, required=True, help='whether to compute perspective transform or not, 0 for True')
 parser.add_argument('-j', '--dataset-jsonfile-path', type=str, default='', required=True, help='filepath to dataset jsonfile')
+parser.add_argument('-s', '--save-path', type=str, default='', required=True, help='filepath to save processed frames and datafiles')
 parser.add_argument('-d', '--data-path', type=str, default='', required=True, help='path to the data folder')
 parser.add_argument('--preprocess', type=int, default=0, required=True, help='whether or not to preprocess wheelAccels and event frames, 0 for True')
 parser.add_argument('--eventtype-json-path', type=str, default='', required=True, help='path to the json file describing convertion from event type label to event type description')
@@ -87,10 +88,13 @@ eventMarking_conf = {'cv2_imread_frame_dim': (1920, 1080), # (w, h)
                      'bev_frame_dim': (600,600),
                      'wheel_to_base_dist': 3.5, # 4.572
                      'base_pixel': 20,
-                     'wheel_width': 1.664,
+                     'track_width': 1.692,
+                     'wheel_width':0.305, 
+                     'wheel_diameter':0.686,
                      'xm_per_pix': 4.318/500,
                      'ym_per_pix': 8.8/330, # 8.89
-                     'event_len_pix': 200}
+                     'event_len_pix': 200,
+                     'event_len_scale': 4}
 # Preprocess to get event frames, event 1-d wheelAccel, event 2-d spectrograms, and grouth-truth bbox locations and event labels
 # Write all info to the dataset dictionary
 if args.preprocess==0:
@@ -99,7 +103,7 @@ if args.preprocess==0:
                         date_list = args.date_list,
                         cal_data_path=args.cal_data_path,
                         data_path=args.data_path,
-                        save_path=args.dataset_path,
+                        save_path=args.save_path,
                         json_save_path = args.dataset_jsonfile_path,
                         wheelAccel_conf=wheelAccel_conf,
                         eventmarking_conf=eventMarking_conf,
