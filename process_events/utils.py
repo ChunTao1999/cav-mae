@@ -632,3 +632,10 @@ def _corners(pos_x: float, pos_y: float, yaw: float, width: float, height: float
     points = _rotate(points, yaw)
     points += np.array([pos_x, pos_y])
     return points
+
+
+def transform_bbox(bboxes):
+    """Transforms (x_c, y_c, w, h, alpha) bboxes to (x1, y1, x2, y2) format"""
+    bboxes[:,0], bboxes[:,2] = bboxes[:,0] - bboxes[:,2] / 2, bboxes[:,0] + bboxes[:,2] / 2
+    bboxes[:,1], bboxes[:,3] = bboxes[:,1] - bboxes[:,3] / 2, bboxes[:,1] - bboxes[:,3] / 2
+    return bboxes

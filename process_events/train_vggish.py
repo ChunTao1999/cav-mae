@@ -24,7 +24,7 @@ from preprocess_data import preprocess
 from utils import calibrate_camera, define_perspective_transform, plot_image, plot_conf_matrix, save_loss_tallies, plot_loss_curves
 from utils import polygon_area, compute_intersection_area, compute_union_area
 from models import EventNN, ModifiedResNet18, ResNet18plusVGGish
-from torchsummary import summary
+from torchinfo import summary
 from sklearn.metrics import confusion_matrix
 import seaborn as sns
 import pdb # debug

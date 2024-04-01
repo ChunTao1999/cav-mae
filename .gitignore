@@ -13,7 +13,8 @@ venv
 *.ckpt
 *.json
 *.bin
-pretrained_model/*
+# custom
+*.pyc
 !pretrained_model/README.md
 src/dataloader_old.py
 !src/preprocess/sample_datafiles/*

@@ -24,7 +24,7 @@ import torch
 import torch.nn.functional as nnF
 from torch.utils.data import Dataset
 import torchvision.transforms as T
-import torchaudio
+# import torchaudio
 import pdb # debug
 
 
@@ -45,7 +45,8 @@ class RoadEventDataset(Dataset):
 
         self.dataFolderPath = data_folder_path
         self.event_ids = list(self.data.keys())   
-        self.frame_list = self.get_frame_list() # get the frames correponding to self.split
+        self.frame_list, self.neg_count, self.pos_count = self.get_frame_list() # get the frames correponding to self.split, neg_count=643, pos_count=132
+        # self.loss_ratio = [len(self.event_ids)/self.neg_count, len(self.event_ids)/self.pos_count]
         self.frame_type = dataset_conf['frame_type']
         assert (self.frame_type in ["undistorted_rv", 
                                     "undistorted_rv_annotated",
@@ -61,7 +62,12 @@ class RoadEventDataset(Dataset):
 
     def get_frame_list(self):
         frame_list = []
+        neg_count, pos_count = 0, 0
         for event_id in self.event_ids:
+            if self.data[event_id]['label'] == '4':
+                neg_count += 1
+            elif self.data[event_id]['label'] == '5':
+                pos_count += 1
             for frame_path in self.data[event_id]['frames']:
                 if self.split == "train" and self.split_dict[frame_path] == 0:
                     frame_list.append(frame_path)
@@ -69,7 +75,7 @@ class RoadEventDataset(Dataset):
                     frame_list.append(frame_path)
                 elif self.split == "test" and self.split_dict[frame_path] == 2:
                     frame_list.append(frame_path)
-        return frame_list
+        return frame_list, neg_count, pos_count
 
 
     def load_spec(self, wheel_accel_path):
@@ -120,7 +126,8 @@ class RoadEventDataset(Dataset):
         # Note (11.25): need to transform the bbox dimensions
         rv_rotated_bbox = torch.tensor(data['rv_rot_rect_box_dim'][frame_idx])[:-1].float() # (5,), (x_c, y_c, alpha, w, h)
         rv_rotated_bbox = self.bbox_transform(rv_rotated_bbox, orig_size=(1920,1080), new_size=self.frame_size)
-        event_cls_lbl = torch.tensor(int(data['label'])).type(torch.LongTensor) # (1,)
+        # event_cls_lbl = torch.tensor(int(data['label'])-4).type(torch.LongTensor) # (1,)
+        event_cls_lbl = torch.tensor(int(data['label'])-4).float() # 0 for negative, 1 for positive
         event_motion_lbl = torch.tensor([data['speed'], data['settling_time'], data['settling_dist'], data['p2p_time']]).float() # (4,), (speed_at_event, settling time, settling distance, p2p time)
 
         # return transformed frame, transformed motion, and GT labels
