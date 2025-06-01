@@ -1,4 +1,4 @@
-# Implementation by tao88
+# Implementation by ctao
 
 ## Data Preparation
 ### Download a video from Youtube (on MacOS)
